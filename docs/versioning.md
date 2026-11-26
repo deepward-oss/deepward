@@ -60,8 +60,7 @@ Maintainers release from `main`:
    ```
 3. The `release` workflow runs the tests, builds the binaries, archives,
    checksums, SBOMs and the container image with GoReleaser, publishes the
-   GitHub release with the changelog section as notes, and attests the build
-   provenance of the archives and the image.
+   GitHub release with the changelog section as notes.
 
 Tags with a pre-release suffix (`v0.2.0-rc.1`) are published as
 pre-releases and do not move the `latest` and `X.Y` image tags.

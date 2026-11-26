@@ -35,12 +35,10 @@ deepward fix --publish                # open/update merge or pull requests
 
 Download an archive for Linux, macOS or Windows (amd64 or arm64) from the
 [releases page](https://github.com/deepward-oss/deepward/releases) and put
-`deepward` on your `PATH`. Every release has a `checksums.txt`, SBOMs and
-build provenance attestations:
+`deepward` on your `PATH`. Every release has a `checksums.txt` and SBOMs:
 
 ```sh
 sha256sum --check --ignore-missing checksums.txt
-gh attestation verify deepward_0.2.0_linux_amd64.tar.gz --repo deepward-oss/deepward
 ```
 
 The container image (linux/amd64 and linux/arm64) has only the static

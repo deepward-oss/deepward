@@ -30,6 +30,12 @@ All notable changes to Deepward are listed here. The format follows
 - SDK: `deps.DependencyLister`, optionally implemented by version registries,
   lists the dependencies a published package version declares.
 
+### Removed
+
+- Build provenance attestations of release archives and the container image:
+  GitHub does not offer them for this repository on its current plan.
+  Verify downloads with `checksums.txt`.
+
 ## [0.1.0] - 2026-11-26
 
 First public release.
