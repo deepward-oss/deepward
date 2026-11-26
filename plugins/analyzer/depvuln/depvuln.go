@@ -287,13 +287,19 @@ func (a *Analyzer) findings(ctx context.Context, req sdk.AnalyzeRequest, g *deps
 	if !n.Direct {
 		ancestors = g.DirectAncestors(n.ID)
 	}
-	remediations := a.remediations(ctx, req, g, n, pkg, fixed, hasFix, ancestors, registry)
+	// up is the direct ancestor to upgrade (the closest one, unless a farther
+	// one is found to bring the fix) and what its newer versions bring.
+	var up probe
+	if len(ancestors) > 0 && hasFix {
+		up = upgradeAncestor(ctx, *req.Project, g, registry, n, ancestors, matched)
+	} else if len(ancestors) > 0 {
+		up.ancestor, _ = g.Node(ancestors[0])
+	}
+	remediations := a.remediations(ctx, req, n, pkg, fixed, hasFix, up, registry)
 	paths := g.Paths(n.ID, a.cfg.MaxPaths)
 	declaring := n
-	if len(ancestors) > 0 {
-		if anc, ok := g.Node(ancestors[0]); ok {
-			declaring = anc
-		}
+	if up.ancestor.ID != "" {
+		declaring = up.ancestor
 	}
 	fileLoc := manifestLocation(req, declaring)
 	var out []sdk.Finding
@@ -336,7 +342,10 @@ func (a *Analyzer) findings(ctx context.Context, req sdk.AnalyzeRequest, g *deps
 			}
 			props["ancestors"] = names
 		}
-		props["recommendation"] = recommendation(n, fixed, hasFix, ancestors, g)
+		if up.outcome == outcomeFound {
+			props["ancestorUpgrade"] = map[string]any{"package": up.ancestor.Name, "from": up.ancestor.Version, "to": up.to, "brings": up.brings}
+		}
+		props["recommendation"] = recommendation(n, fixed, hasFix, up, req.Project.Ecosystem)
 		if n.Scope == deps.ScopeNotBuilt {
 			f.NotBuilt = true
 			props["notBuilt"] = true
@@ -353,8 +362,8 @@ func (a *Analyzer) findings(ctx context.Context, req sdk.AnalyzeRequest, g *deps
 	return out
 }
 
-func (a *Analyzer) remediations(ctx context.Context, req sdk.AnalyzeRequest, g *deps.Graph, n deps.Node, pkg string, fixed deps.Version, hasFix bool,
-	ancestors []string, registry deps.VersionRegistry) []sdk.Remediation {
+func (a *Analyzer) remediations(ctx context.Context, req sdk.AnalyzeRequest, n deps.Node, pkg string, fixed deps.Version, hasFix bool,
+	up probe, registry deps.VersionRegistry) []sdk.Remediation {
 	if !hasFix {
 		return nil
 	}
@@ -364,43 +373,59 @@ func (a *Analyzer) remediations(ctx context.Context, req sdk.AnalyzeRequest, g *
 			Package: &sdk.PackageChange{PURL: pkg, From: n.Version, To: fixed.String(), Reason: "fixes vulnerabilities"}}}
 	}
 	var out []sdk.Remediation
-	if len(ancestors) > 0 && registry != nil && a.cfg.MaxCandidates > 0 {
-		if anc, ok := g.Node(ancestors[0]); ok {
-			if cur, err := deps.ParseVersion(anc.Ecosystem, anc.Version); err == nil {
-				ancPkg := withoutVersion(anc.ID)
-				vs, _ := registry.Versions(ctx, *req.Project, ancPkg)
-				var cands []deps.Version
-				for _, raw := range vs {
-					if v, err := deps.ParseVersion(anc.Ecosystem, raw); err == nil && cur.Less(v) && !v.IsPrerelease() {
-						cands = append(cands, v)
-					}
-				}
-				sort.Slice(cands, func(i, j int) bool { return cands[i].Less(cands[j]) })
-				if len(cands) > a.cfg.MaxCandidates {
-					cands = cands[:a.cfg.MaxCandidates]
-				}
-				for _, c := range cands {
-					out = append(out, sdk.Remediation{Description: fmt.Sprintf("upgrade %s %s → %s to bring %s ≥ %s", anc.Name, anc.Version, c, n.Name, fixed),
-						Group: group, Package: &sdk.PackageChange{PURL: ancPkg, From: anc.Version, To: c.String(), Reason: "brings a fixed " + n.Name}})
-				}
-			}
-		}
+	anc := up.ancestor
+	switch {
+	case anc.ID == "":
+	case up.outcome == outcomeFound:
+		// The published dependencies say which ancestor version brings the
+		// fix; deepward fix still verifies it against the whole project.
+		out = append(out, sdk.Remediation{Description: fmt.Sprintf("upgrade %s %s → %s to bring %s %s", anc.Name, anc.Version, up.to, n.Name, up.brings),
+			Group: group, Package: &sdk.PackageChange{PURL: withoutVersion(anc.ID), From: anc.Version, To: up.to, Reason: "brings a fixed " + n.Name}})
+	case up.outcome == outcomeUnknown && registry != nil && a.cfg.MaxCandidates > 0:
+		// Unknown: offer the next releases for deepward fix to try.
+		out = append(out, a.blindCandidates(ctx, req, anc, n, fixed, group, registry)...)
 	}
 	out = append(out, sdk.Remediation{Description: fmt.Sprintf("pin transitive %s %s → %s", n.Name, n.Version, fixed), Group: group,
 		Package: &sdk.PackageChange{PURL: pkg, From: n.Version, To: fixed.String(), Pin: true, Reason: "fixes vulnerabilities"}})
 	return out
 }
 
-func recommendation(n deps.Node, fixed deps.Version, hasFix bool, ancestors []string, g *deps.Graph) string {
+// blindCandidates lists the next releases of the ancestor, for when what they
+// bring could not be checked.
+func (a *Analyzer) blindCandidates(ctx context.Context, req sdk.AnalyzeRequest, anc, n deps.Node, fixed deps.Version, group string,
+	registry deps.VersionRegistry) []sdk.Remediation {
+	cur, err := deps.ParseVersion(anc.Ecosystem, anc.Version)
+	if err != nil {
+		return nil
+	}
+	ancPkg := withoutVersion(anc.ID)
+	vs, _ := registry.Versions(ctx, *req.Project, ancPkg)
+	var cands []deps.Version
+	for _, raw := range vs {
+		if v, err := deps.ParseVersion(anc.Ecosystem, raw); err == nil && cur.Less(v) && !v.IsPrerelease() {
+			cands = append(cands, v)
+		}
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].Less(cands[j]) })
+	if len(cands) > a.cfg.MaxCandidates {
+		cands = cands[:a.cfg.MaxCandidates]
+	}
+	var out []sdk.Remediation
+	for _, c := range cands {
+		out = append(out, sdk.Remediation{Description: fmt.Sprintf("upgrade %s %s → %s to bring %s ≥ %s", anc.Name, anc.Version, c, n.Name, fixed),
+			Group: group, Package: &sdk.PackageChange{PURL: ancPkg, From: anc.Version, To: c.String(), Reason: "brings a fixed " + n.Name}})
+	}
+	return out
+}
+
+func recommendation(n deps.Node, fixed deps.Version, hasFix bool, up probe, ecosystem string) string {
 	if !hasFix {
 		return "no fixed version is available yet; consider removing the dependency or suppressing the finding with a reason"
 	}
-	if n.Direct || len(ancestors) == 0 {
+	if n.Direct || up.ancestor.ID == "" {
 		return fmt.Sprintf("upgrade %s to %s", n.Name, fixed)
 	}
-	anc, _ := g.Node(ancestors[0])
-	return fmt.Sprintf("upgrade %s to a version that brings %s ≥ %s (deepward fix tries newer versions and verifies them), or pin %s to %s",
-		anc.Name, n.Name, fixed, n.Name, fixed)
+	return probeRecommendation(up, n, fixed, ecosystem)
 }
 
 func firstSummary(advs []deps.Advisory) string {

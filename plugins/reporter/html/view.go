@@ -48,6 +48,93 @@ type vulnRow struct {
 	NotBuilt       bool
 }
 
+// vulnGroup is one vulnerable package version of a project with all the
+// advisories that affect it: they share the dependency path, the fixed
+// version and the recommended action, so the report shows them as one row.
+type vulnGroup struct {
+	Severity       string
+	Rank           int
+	Package        string
+	Version        string
+	Project        string
+	Ecosystem      string
+	Direct         bool
+	Scope          string
+	FixedIn        string
+	NoFix          bool
+	Paths          []string
+	Recommendation string
+	Location       string
+	NotBuilt       bool
+	Search         string
+	// Findings lists the severity of every advisory, for filters and counts.
+	Findings   string
+	Advisories []vulnRow
+}
+
+// IDs returns the advisory identifiers of the group.
+func (g vulnGroup) IDs() []string {
+	out := make([]string, 0, len(g.Advisories))
+	for _, a := range g.Advisories {
+		out = append(out, a.ID)
+	}
+	return out
+}
+
+// groupVulns merges advisories by project, package and version, keeping the
+// order of first appearance; advisories inside a group are sorted by
+// severity, then ID, and the group takes the highest severity.
+func groupVulns(rows []vulnRow) []vulnGroup {
+	var out []vulnGroup
+	index := map[string]int{}
+	for _, r := range rows {
+		k := r.Project + "\x00" + r.Package + "\x00" + r.Version
+		i, ok := index[k]
+		if !ok {
+			i = len(out)
+			index[k] = i
+			out = append(out, vulnGroup{Package: r.Package, Version: r.Version, Project: r.Project, Ecosystem: r.Ecosystem, Direct: r.Direct,
+				Scope: r.Scope, FixedIn: r.FixedIn, NoFix: r.NoFix, Paths: r.Paths, Recommendation: r.Recommendation, Location: r.Location,
+				NotBuilt: r.NotBuilt, Rank: -1})
+		}
+		g := &out[i]
+		g.Advisories = append(g.Advisories, r)
+		if r.Rank > g.Rank {
+			g.Rank, g.Severity = r.Rank, r.Severity
+		}
+		g.FixedIn = firstNonEmpty(g.FixedIn, r.FixedIn)
+		g.Recommendation = firstNonEmpty(g.Recommendation, r.Recommendation)
+		g.NoFix = g.NoFix && r.NoFix
+	}
+	for i := range out {
+		g := &out[i]
+		sort.SliceStable(g.Advisories, func(a, b int) bool {
+			if g.Advisories[a].Rank != g.Advisories[b].Rank {
+				return g.Advisories[a].Rank > g.Advisories[b].Rank
+			}
+			return g.Advisories[a].ID < g.Advisories[b].ID
+		})
+		sevs := make([]string, 0, len(g.Advisories))
+		search := []string{}
+		for _, a := range g.Advisories {
+			sevs = append(sevs, a.Severity)
+			search = append(search, a.Search)
+		}
+		g.Findings = strings.Join(sevs, " ")
+		g.Search = strings.Join(search, " ")
+	}
+	return out
+}
+
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 type outdatedRow struct {
 	Package    string
 	Current    string
@@ -96,19 +183,22 @@ type view struct {
 	Analyzers    []count
 	ProjectStats []count
 	Projects     []projectRow
-	Vulns        []vulnRow
-	VulnCounts   []count
+	Vulns        []vulnGroup
+	// VulnAdvisories is the number of advisories in Vulns.
+	VulnAdvisories int
+	VulnCounts     []count
 	// NotBuiltVulns are vulnerabilities in packages that are not built,
 	// shown in their own section.
-	NotBuiltVulns  []vulnRow
-	NotBuiltCounts []count
-	NotBuilt       int
-	Outdated       []outdatedRow
-	Generic        []kindGroup
-	Suppressed     []suppressedRow
-	FailedRuns     []sdk.PluginRun
-	ProjectIDs     []string
-	Ecosystems     []string
+	NotBuiltVulns      []vulnGroup
+	NotBuiltAdvisories int
+	NotBuiltCounts     []count
+	NotBuilt           int
+	Outdated           []outdatedRow
+	Generic            []kindGroup
+	Suppressed         []suppressedRow
+	FailedRuns         []sdk.PluginRun
+	ProjectIDs         []string
+	Ecosystems         []string
 }
 
 var displaySeverities = []sdk.Severity{sdk.SeverityCritical, sdk.SeverityHigh, sdk.SeverityMedium, sdk.SeverityLow, sdk.SeverityUnknown}
@@ -199,6 +289,7 @@ func buildView(res *sdk.ScanResult) *view {
 	}
 	v.Ecosystems = sortedKeys(ecos)
 	vulnCounts, notBuiltCounts := map[string]int{}, map[string]int{}
+	var vulns, notBuiltVulns []vulnRow
 	generic := map[sdk.FindingKind][]genericRow{}
 	for _, f := range res.Findings {
 		if f.Suppression != nil {
@@ -215,11 +306,11 @@ func buildView(res *sdk.ScanResult) *view {
 			row := vulnRowOf(f)
 			if row.NotBuilt {
 				notBuiltCounts[row.Severity]++
-				v.NotBuiltVulns = append(v.NotBuiltVulns, row)
+				notBuiltVulns = append(notBuiltVulns, row)
 				break
 			}
 			vulnCounts[row.Severity]++
-			v.Vulns = append(v.Vulns, row)
+			vulns = append(vulns, row)
 		case sdk.KindOutdated:
 			v.Outdated = append(v.Outdated, outdatedRowOf(f))
 		default:
@@ -229,6 +320,8 @@ func buildView(res *sdk.ScanResult) *view {
 			generic[f.Kind] = append(generic[f.Kind], r)
 		}
 	}
+	v.Vulns, v.VulnAdvisories = groupVulns(vulns), len(vulns)
+	v.NotBuiltVulns, v.NotBuiltAdvisories = groupVulns(notBuiltVulns), len(notBuiltVulns)
 	for _, s := range displaySeverities {
 		v.VulnCounts = append(v.VulnCounts, count{Name: string(s), Count: vulnCounts[string(s)]})
 		v.NotBuiltCounts = append(v.NotBuiltCounts, count{Name: string(s), Count: notBuiltCounts[string(s)]})

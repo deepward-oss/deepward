@@ -102,6 +102,20 @@ type VersionRegistry interface {
 	Versions(ctx context.Context, project sdk.Project, pkg string) ([]string, error)
 }
 
+// DependencyLister is optionally implemented by version registries: it lists
+// the runtime dependencies a published package version declares, so that an
+// analyzer can tell which version of a direct dependency brings a fixed
+// transitive one without running the build.
+type DependencyLister interface {
+	// Dependencies returns the dependencies that pkg (a purl without version)
+	// declares at version, keyed by package name as used in the graph
+	// ("group:artifact" for Maven), each with the version the package itself
+	// asks for (before conflict resolution with the rest of the project). An
+	// empty version means the dependency is declared but its version could
+	// not be determined. Test-only and optional dependencies are left out.
+	Dependencies(ctx context.Context, project sdk.Project, pkg, version string) (map[string]string, error)
+}
+
 // ReleaseNotesProvider is optionally implemented by version registries.
 type ReleaseNotesProvider interface {
 	ReleaseNotesURL(ctx context.Context, project sdk.Project, pkg, version string) (string, error)

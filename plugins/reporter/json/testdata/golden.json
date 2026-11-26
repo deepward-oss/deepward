@@ -4,7 +4,7 @@
     "name": "deepward",
     "version": "1.0.0",
     "commit": "abc1234",
-    "sdkVersion": "0.1.0"
+    "sdkVersion": "0.2.0"
   },
   "run": {
     "startedAt": "2026-11-26T09:30:00Z",

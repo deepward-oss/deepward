@@ -13,7 +13,7 @@ built-in ones, is a plugin.
 
 | Kind | Contract | Orchestrated by | Built-in examples |
 |------|----------|-----------------|-------------------|
-| `ecosystem` | `sdk.Ecosystem` (+ optional `FactProducer`, `RemediationRealizer`, `AddonProvider`, `ToolDefiner`, `deps.VersionRegistry`) | engine | `maven`, `sbt`, `nuget`, `npm`, `go`, `cargo` |
+| `ecosystem` | `sdk.Ecosystem` (+ optional `FactProducer`, `RemediationRealizer`, `AddonProvider`, `ToolDefiner`, `deps.VersionRegistry`, `deps.DependencyLister`) | engine | `maven`, `sbt`, `nuget`, `npm`, `go`, `cargo` |
 | `analyzer` | `sdk.Analyzer` | engine | `dependency-vulnerabilities`, `outdated-dependencies`, `sarif-import` |
 | `fact-producer` | `sdk.FactProducer` | engine | `sbom-import` |
 | `reporter` | `sdk.Reporter` | engine | `html`, `json`, `sarif` |

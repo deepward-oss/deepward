@@ -65,6 +65,7 @@ type Plugin struct {
 	cfg    Config
 	host   sdk.Host
 	client *mavenrepo.Client
+	poms   *domain.Resolver
 	// Getenv overrides os.Getenv (tests).
 	Getenv func(string) string
 }
@@ -105,6 +106,7 @@ func (p *Plugin) Init(_ context.Context, h sdk.Host) error {
 	}
 	cache := &httpcache.Cache{Dir: settings.CacheDir, TTL: ttl, Disabled: settings.NoCache || settings.CacheDir == ""}
 	p.client = &mavenrepo.Client{Repositories: repos, Cache: cache, UserAgent: "deepward"}
+	p.poms = &domain.Resolver{Fetch: p.client.FetchPOM}
 	return nil
 }
 
@@ -285,6 +287,20 @@ func (p *Plugin) Versions(ctx context.Context, _ sdk.Project, pkg string) ([]str
 		return nil, errors.New("maven plugin not initialized")
 	}
 	return p.client.Versions(ctx, strings.ReplaceAll(pu.Namespace, "/", "."), pu.Name)
+}
+
+// Dependencies implements deps.DependencyLister: it reads the published POM
+// of pkg at version (with its parents and imported BOMs) from the configured
+// repositories.
+func (p *Plugin) Dependencies(ctx context.Context, _ sdk.Project, pkg, version string) (map[string]string, error) {
+	pu, err := purl.Parse(pkg)
+	if err != nil {
+		return nil, err
+	}
+	if p.poms == nil {
+		return nil, errors.New("maven plugin not initialized")
+	}
+	return p.poms.Dependencies(ctx, strings.ReplaceAll(pu.Namespace, "/", "."), pu.Name, version)
 }
 
 func firstNonEmpty(vs ...string) string {

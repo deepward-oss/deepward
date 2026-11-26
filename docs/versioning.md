@@ -3,7 +3,7 @@
 Deepward follows [Semantic Versioning 2.0](https://semver.org/spec/v2.0.0.html).
 Releases are Git tags `vMAJOR.MINOR.PATCH`, for example `v0.1.0`. Deepward
 prints versions without the `v`: `deepward version` shows
-`deepward 0.1.0 (commit …, built …, sdk 0.1.0)`. `deepward --version` prints
+`deepward 0.2.0 (commit …, built …, sdk 0.2.0)`. `deepward --version` prints
 the same line.
 
 ## Before 1.0

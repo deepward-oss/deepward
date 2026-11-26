@@ -225,6 +225,35 @@ func TestVersionsAndMetadata(t *testing.T) {
 	}
 }
 
+func TestDependenciesFromPublishedPOM(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/org/apache/kafka/kafka-clients/4.5.0/kafka-clients-4.5.0.pom" {
+			_, _ = w.Write([]byte(`<project><groupId>org.apache.kafka</groupId><artifactId>kafka-clients</artifactId><version>4.5.0</version>
+<dependencies><dependency><groupId>at.yawk.lz4</groupId><artifactId>lz4-java</artifactId><version>1.11.4</version><scope>runtime</scope></dependency></dependencies></project>`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	p := New()
+	p.cfg = Config{Repositories: []Repository{{URL: srv.URL}}}
+	initPlugin(t, p, nil)
+	var _ deps.DependencyLister = p
+	got, err := p.Dependencies(context.Background(), sdk.Project{}, "pkg:maven/org.apache.kafka/kafka-clients", "4.5.0")
+	if err != nil || got["at.yawk.lz4:lz4-java"] != "1.11.4" || len(got) != 1 {
+		t.Errorf("dependencies: %v %v", got, err)
+	}
+	if _, err := p.Dependencies(context.Background(), sdk.Project{}, "pkg:maven/org.apache.kafka/kafka-clients", "9.9"); err == nil {
+		t.Error("missing POM")
+	}
+	if _, err := p.Dependencies(context.Background(), sdk.Project{}, "nope", "1"); err == nil {
+		t.Error("bad purl")
+	}
+	if _, err := New().Dependencies(context.Background(), sdk.Project{}, "pkg:maven/x/y", "1"); err == nil {
+		t.Error("not initialized")
+	}
+}
+
 func TestConfigAndMetadata(t *testing.T) {
 	p := New()
 	if (&Config{Repositories: []Repository{{ID: "x"}}}).Validate() == nil || (&Config{}).Validate() != nil {

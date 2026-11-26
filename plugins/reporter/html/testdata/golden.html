@@ -68,6 +68,8 @@ tbody.item.hidden { display: none; }
 .kv dd { margin: 0; }
 .kv ul { margin: 0; padding-left: 18px; }
 .title { font-weight: 600; margin: 0 0 8px; }
+section.advisory { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 12px 0 0; margin-top: 12px; background: transparent; }
+section.advisory h4 { margin: 0 0 6px; font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .empty { color: var(--muted); font-style: italic; }
 .status-failed td:nth-child(2) { color: var(--high); font-weight: 600; }
 .status-skipped td:nth-child(2) { color: var(--medium); font-weight: 600; }
@@ -122,87 +124,108 @@ a { color: var(--accent); }
 <section id="vulnerabilities">
   <h2>Vulnerabilities <span class="count" data-count-for="vulns">3</span></h2>
   
-  <p class="muted">1 critical · 1 high · 1 medium · 0 low · 0 unknown</p>
+  <p class="muted">3 advisories in 3 package version(s): 1 critical · 1 high · 1 medium · 0 low · 0 unknown</p>
   <table class="findings" id="vulns">
     <thead><tr>
-      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Advisory</th><th data-sort="text">Package</th>
+      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Advisories</th><th data-sort="text">Package</th>
       <th data-sort="text">Project</th><th data-sort="text">Dependency</th><th data-sort="text">Fixed in</th>
     </tr></thead>
     
-    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="critical" data-direct="direct" data-built="built" data-search="cve-2021-44228 org.apache.logging.log4j:log4j-core 2.14.1 issue in pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1 ghsa-jfh8-c2jp-5v3q" data-rank="5">
+    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="critical" data-findings="critical" data-direct="direct" data-built="built" data-search="cve-2021-44228 org.apache.logging.log4j:log4j-core 2.14.1 issue in pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1 ghsa-jfh8-c2jp-5v3q" data-rank="5">
       <tr class="main">
-        <td><span class="badge sev-critical">critical</span> <span class="muted">10</span></td>
-        <td><button type="button" class="toggle" aria-expanded="true">CVE-2021-44228</button><div class="muted small">GHSA-jfh8-c2jp-5v3q</div></td>
+        <td><span class="badge sev-critical">critical</span></td>
+        <td><button type="button" class="toggle" aria-expanded="true">1 advisory</button><div class="muted small">CVE-2021-44228</div></td>
         <td><code>org.apache.logging.log4j:log4j-core</code> <span class="ver">2.14.1</span></td>
         <td>maven:.</td>
         <td>direct <span class="muted">(compile)</span></td>
         <td><code>2.17.1</code></td>
       </tr>
       <tr class="detail"><td colspan="6">
-        <p class="title">Issue in pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1</p>
         <dl class="kv">
-          <dt>CVSS</dt><dd><code>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H</code></dd>
-          <dt>Affected</dt><dd><code>&gt;=2.0-beta9, &lt;2.15.0</code> </dd>
-          <dt>Fixed in</dt><dd><code>2.17.1</code></dd>
-          <dt>Dependency path</dt><dd><ul class="paths"><li>org.springframework.boot:spring-boot-starter-web@2.5.0 → org.apache.logging.log4j:log4j-core@2.14.1</li></ul></dd>
+          <dt>Fixed in</dt><dd><code>2.17.1</code> <span class="muted">(fixes all advisories below)</span></dd>
           <dt>Recommended action</dt><dd>upgrade org.apache.logging.log4j:log4j-core to 2.17.1</dd>
+          <dt>Dependency path</dt><dd><ul class="paths"><li>org.springframework.boot:spring-boot-starter-web@2.5.0 → org.apache.logging.log4j:log4j-core@2.14.1</li></ul></dd>
           <dt>Declared in</dt><dd><code>core/pom.xml:14</code></dd>
-          <dt>Sources</dt><dd>ghsa, osv</dd>
-          <dt>Published</dt><dd>2021-12-10</dd>
-          <dt>References</dt><dd><ul class="refs"><li><a href="https://osv.dev/vulnerability/CVE-2021-44228" rel="noopener noreferrer">https://osv.dev/vulnerability/CVE-2021-44228</a></li></ul></dd>
         </dl>
-        <details class="desc"><summary>Description</summary><pre>Apache Log4j2 JNDI features &lt;script&gt;alert(1)&lt;/script&gt; do not protect against attacker controlled LDAP.</pre></details>
+        
+        <section class="advisory">
+          <h4><span class="badge sev-critical">critical</span> <span class="muted">10</span> <code>CVE-2021-44228</code> <span class="muted small">GHSA-jfh8-c2jp-5v3q</span></h4>
+          <p class="title">Issue in pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1</p>
+          <dl class="kv">
+            <dt>CVSS</dt><dd><code>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H</code></dd>
+            <dt>Affected</dt><dd><code>&gt;=2.0-beta9, &lt;2.15.0</code> </dd>
+            <dt>Sources</dt><dd>ghsa, osv</dd>
+            <dt>Published</dt><dd>2021-12-10</dd>
+            <dt>References</dt><dd><ul class="refs"><li><a href="https://osv.dev/vulnerability/CVE-2021-44228" rel="noopener noreferrer">https://osv.dev/vulnerability/CVE-2021-44228</a></li></ul></dd>
+          </dl>
+          <details class="desc"><summary>Description</summary><pre>Apache Log4j2 JNDI features &lt;script&gt;alert(1)&lt;/script&gt; do not protect against attacker controlled LDAP.</pre></details>
+        </section>
+        
       </td></tr>
     </tbody>
 
-    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="high" data-direct="transitive" data-built="built" data-search="cve-2020-36518 com.fasterxml.jackson.core:jackson-databind 2.12.1 issue in pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1" data-rank="4">
+    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="high" data-findings="high" data-direct="transitive" data-built="built" data-search="cve-2020-36518 com.fasterxml.jackson.core:jackson-databind 2.12.1 issue in pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1" data-rank="4">
       <tr class="main">
         <td><span class="badge sev-high">high</span></td>
-        <td><button type="button" class="toggle" aria-expanded="true">CVE-2020-36518</button></td>
+        <td><button type="button" class="toggle" aria-expanded="true">1 advisory</button><div class="muted small">CVE-2020-36518</div></td>
         <td><code>com.fasterxml.jackson.core:jackson-databind</code> <span class="ver">2.12.1</span></td>
         <td>maven:.</td>
         <td>transitive <span class="muted">(compile)</span></td>
         <td><code>2.12.6.1</code></td>
       </tr>
       <tr class="detail"><td colspan="6">
-        <p class="title">Issue in pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1</p>
         <dl class="kv">
+          <dt>Fixed in</dt><dd><code>2.12.6.1</code> <span class="muted">(fixes all advisories below)</span></dd>
           
-          
-          <dt>Fixed in</dt><dd><code>2.12.6.1</code></dd>
           <dt>Dependency path</dt><dd><ul class="paths"><li>org.springframework.boot:spring-boot-starter-web@2.5.0 → com.fasterxml.jackson.core:jackson-databind@2.12.1</li></ul></dd>
-          
           <dt>Declared in</dt><dd><code>core/pom.xml:14</code></dd>
-          
-          
-          <dt>References</dt><dd><ul class="refs"><li><a href="https://osv.dev/vulnerability/CVE-2020-36518" rel="noopener noreferrer">https://osv.dev/vulnerability/CVE-2020-36518</a></li></ul></dd>
         </dl>
+        
+        <section class="advisory">
+          <h4><span class="badge sev-high">high</span> <code>CVE-2020-36518</code></h4>
+          <p class="title">Issue in pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1</p>
+          <dl class="kv">
+            
+            
+            
+            
+            <dt>References</dt><dd><ul class="refs"><li><a href="https://osv.dev/vulnerability/CVE-2020-36518" rel="noopener noreferrer">https://osv.dev/vulnerability/CVE-2020-36518</a></li></ul></dd>
+          </dl>
+          
+        </section>
         
       </td></tr>
     </tbody>
 
-    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="medium" data-direct="direct" data-built="built" data-search="ghsa-noff-ix00-0000 junit:junit@4.13.1  issue in pkg:maven/junit/junit@4.13.1" data-rank="3">
+    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="medium" data-findings="medium" data-direct="direct" data-built="built" data-search="ghsa-noff-ix00-0000 junit:junit@4.13.1  issue in pkg:maven/junit/junit@4.13.1" data-rank="3">
       <tr class="main">
         <td><span class="badge sev-medium">medium</span></td>
-        <td><button type="button" class="toggle" aria-expanded="true">GHSA-noff-ix00-0000</button></td>
+        <td><button type="button" class="toggle" aria-expanded="true">1 advisory</button><div class="muted small">GHSA-noff-ix00-0000</div></td>
         <td><code>junit:junit@4.13.1</code> <span class="ver"></span></td>
         <td>maven:.</td>
         <td>direct <span class="muted">(compile)</span></td>
         <td><span class="muted">no fix</span></td>
       </tr>
       <tr class="detail"><td colspan="6">
-        <p class="title">Issue in pkg:maven/junit/junit@4.13.1</p>
         <dl class="kv">
           
           
-          
           <dt>Dependency path</dt><dd><ul class="paths"><li>org.springframework.boot:spring-boot-starter-web@2.5.0 → junit:junit@4.13.1</li></ul></dd>
-          
           <dt>Declared in</dt><dd><code>core/pom.xml:14</code></dd>
-          
-          
-          <dt>References</dt><dd><ul class="refs"><li><a href="https://osv.dev/vulnerability/GHSA-noff-ix00-0000" rel="noopener noreferrer">https://osv.dev/vulnerability/GHSA-noff-ix00-0000</a></li></ul></dd>
         </dl>
+        
+        <section class="advisory">
+          <h4><span class="badge sev-medium">medium</span> <code>GHSA-noff-ix00-0000</code></h4>
+          <p class="title">Issue in pkg:maven/junit/junit@4.13.1</p>
+          <dl class="kv">
+            
+            
+            
+            
+            <dt>References</dt><dd><ul class="refs"><li><a href="https://osv.dev/vulnerability/GHSA-noff-ix00-0000" rel="noopener noreferrer">https://osv.dev/vulnerability/GHSA-noff-ix00-0000</a></li></ul></dd>
+          </dl>
+          
+        </section>
         
       </td></tr>
     </tbody>
@@ -310,6 +333,12 @@ a { color: var(--accent); }
     return el ? el.value.trim().toLowerCase() : "";
   }
 
+  // A vulnerability row is one package version with several advisories:
+  // data-findings lists the severity of each, so filters and counts see them.
+  function severities(item) {
+    return (item.dataset.findings || item.dataset.severity || "").split(" ");
+  }
+
   function apply() {
     var project = value("f-project"), eco = value("f-ecosystem"), sev = value("f-severity"),
         direct = value("f-direct"), built = value("f-built"), q = value("f-search");
@@ -317,7 +346,7 @@ a { color: var(--accent); }
       var d = item.dataset;
       var show = (!project || d.project.toLowerCase() === project) &&
         (!eco || d.ecosystem === eco) &&
-        (!sev || d.severity === sev) &&
+        (!sev || severities(item).indexOf(sev) >= 0) &&
         (!direct || d.direct === direct) &&
         (!built || (d.built || "built") === built) &&
         (!q || d.search.indexOf(q) >= 0);
@@ -331,8 +360,9 @@ a { color: var(--accent); }
     var counts = {}, notBuilt = 0;
     items.forEach(function (item) {
       if (item.classList.contains("hidden")) { return; }
-      if (item.dataset.built === "not-built") { notBuilt++; return; }
-      counts[item.dataset.severity] = (counts[item.dataset.severity] || 0) + 1;
+      var sevs = severities(item);
+      if (item.dataset.built === "not-built") { notBuilt += sevs.length; return; }
+      sevs.forEach(function (s) { counts[s] = (counts[s] || 0) + 1; });
     });
     var nb = document.querySelector("[data-summary-notbuilt] .num");
     if (nb) { nb.textContent = notBuilt; }
@@ -370,5 +400,4 @@ a { color: var(--accent); }
 </script>
 </body>
 </html>
-
 

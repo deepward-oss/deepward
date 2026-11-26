@@ -21,6 +21,12 @@
     return el ? el.value.trim().toLowerCase() : "";
   }
 
+  // A vulnerability row is one package version with several advisories:
+  // data-findings lists the severity of each, so filters and counts see them.
+  function severities(item) {
+    return (item.dataset.findings || item.dataset.severity || "").split(" ");
+  }
+
   function apply() {
     var project = value("f-project"), eco = value("f-ecosystem"), sev = value("f-severity"),
         direct = value("f-direct"), built = value("f-built"), q = value("f-search");
@@ -28,7 +34,7 @@
       var d = item.dataset;
       var show = (!project || d.project.toLowerCase() === project) &&
         (!eco || d.ecosystem === eco) &&
-        (!sev || d.severity === sev) &&
+        (!sev || severities(item).indexOf(sev) >= 0) &&
         (!direct || d.direct === direct) &&
         (!built || (d.built || "built") === built) &&
         (!q || d.search.indexOf(q) >= 0);
@@ -42,8 +48,9 @@
     var counts = {}, notBuilt = 0;
     items.forEach(function (item) {
       if (item.classList.contains("hidden")) { return; }
-      if (item.dataset.built === "not-built") { notBuilt++; return; }
-      counts[item.dataset.severity] = (counts[item.dataset.severity] || 0) + 1;
+      var sevs = severities(item);
+      if (item.dataset.built === "not-built") { notBuilt += sevs.length; return; }
+      sevs.forEach(function (s) { counts[s] = (counts[s] || 0) + 1; });
     });
     var nb = document.querySelector("[data-summary-notbuilt] .num");
     if (nb) { nb.textContent = notBuilt; }

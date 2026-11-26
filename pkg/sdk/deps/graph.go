@@ -277,7 +277,10 @@ func (q *pathQueue) Pop() any {
 }
 
 // DirectAncestors returns the direct dependencies through which id is
-// reachable (id itself if it is direct), sorted.
+// reachable (id itself if it is direct), closest first: ordered by the length
+// of the shortest chain from the ancestor down to id, then by ID. The closest
+// ancestor is the one whose version decides the transitive version under
+// nearest-wins resolution, so it is the one worth upgrading.
 func (g *Graph) DirectAncestors(id string) []string {
 	if g.index == nil {
 		g.reindex()
@@ -285,29 +288,73 @@ func (g *Graph) DirectAncestors(id string) []string {
 	if _, ok := g.index[id]; !ok || id == g.Root {
 		return nil
 	}
-	// Ancestors by reverse reachability, stopping at the root's children.
 	direct := map[string]bool{}
 	for _, c := range g.children[g.Root] {
 		direct[c] = true
 	}
-	seen := map[string]bool{id: true}
-	stack := []string{id}
+	// Breadth-first over parents gives every ancestor its distance to id.
+	dist := map[string]int{id: 0}
+	queue := []string{id}
 	var out []string
-	for len(stack) > 0 {
-		cur := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
 		if direct[cur] {
 			out = append(out, cur)
 		}
 		for _, p := range g.parents[cur] {
-			if p != g.Root && !seen[p] {
-				seen[p] = true
-				stack = append(stack, p)
+			if _, seen := dist[p]; !seen && p != g.Root {
+				dist[p] = dist[cur] + 1
+				queue = append(queue, p)
 			}
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool {
+		if dist[out[i]] != dist[out[j]] {
+			return dist[out[i]] < dist[out[j]]
+		}
+		return out[i] < out[j]
+	})
 	return out
+}
+
+// Chain returns the shortest dependency chain from one node down to another,
+// both included (the lexicographically smallest among equally short chains),
+// or nil if to is not reachable from from.
+func (g *Graph) Chain(from, to string) []string {
+	if g.index == nil {
+		g.reindex()
+	}
+	if _, ok := g.index[to]; !ok {
+		return nil
+	}
+	if from == to {
+		return []string{from}
+	}
+	prev := map[string]string{from: ""}
+	queue := []string{from}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		kids := append([]string(nil), g.children[cur]...)
+		sort.Strings(kids)
+		for _, c := range kids {
+			if _, seen := prev[c]; seen {
+				continue
+			}
+			prev[c] = cur
+			if c != to {
+				queue = append(queue, c)
+				continue
+			}
+			chain := []string{to}
+			for p := cur; p != ""; p = prev[p] {
+				chain = append([]string{p}, chain...)
+			}
+			return chain
+		}
+	}
+	return nil
 }
 
 func contains(xs []string, x string) bool {

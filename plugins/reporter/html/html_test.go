@@ -84,11 +84,13 @@ func TestContent(t *testing.T) {
 			t.Errorf("report lacks %q", want)
 		}
 	}
-	// The vulnerability table has one row per active vulnerability, matching the summary per severity.
-	rows := regexp.MustCompile(`<tbody class="item"[^>]*data-severity="(\w+)" data-direct="(?:direct|transitive)"`).FindAllStringSubmatch(out, -1)
+	// Vulnerability rows list the severity of each advisory, matching the summary per severity.
+	rows := regexp.MustCompile(`<tbody class="item"[^>]*data-findings="([\w ]+)"`).FindAllStringSubmatch(out, -1)
 	counts := map[string]int{}
 	for _, r := range rows {
-		counts[r[1]]++
+		for _, sev := range strings.Fields(r[1]) {
+			counts[sev]++
+		}
 	}
 	if counts["critical"] != res.Summary.KindSeverity[sdk.KindVulnerability][sdk.SeverityCritical] ||
 		counts["high"] != res.Summary.KindSeverity[sdk.KindVulnerability][sdk.SeverityHigh] {
@@ -157,5 +159,37 @@ func TestNotBuiltSection(t *testing.T) {
 		if strings.Contains(plain, unwanted) {
 			t.Errorf("report without not-built findings has %q", unwanted)
 		}
+	}
+}
+
+func TestAdvisoriesOfOnePackageShareARow(t *testing.T) {
+	res := sdktest.SampleResult()
+	var second sdk.Finding
+	for _, f := range res.Findings {
+		if f.Rule == "CVE-2021-44228" {
+			second = f
+		}
+	}
+	second.Fingerprint = ""
+	second.Rule, second.Severity, second.Aliases, second.Title = "CVE-2021-45046", sdk.SeverityHigh, nil, "Incomplete fix"
+	second.Properties = map[string]any{"package": second.Properties["package"], "fixedIn": "2.17.1", "affected": []string{">=2.0-beta9, <2.16.0"}}
+	res.Findings = append(res.Findings, second)
+	res.ComputeSummary()
+	out := render(t, res)
+	if got := strings.Count(out, "<code>org.apache.logging.log4j:log4j-core</code>"); got != 1 {
+		t.Errorf("log4j-core rows: %d, want one row for both advisories", got)
+	}
+	for _, want := range []string{
+		`data-severity="critical" data-findings="critical high"`, "2 advisories</button>", "CVE-2021-44228, CVE-2021-45046",
+		"Incomplete fix", "&gt;=2.0-beta9, &lt;2.16.0", "4 advisories in 3 package version(s)",
+		`data-count-for="vulns">3</span>`, `data-summary="high"><div class="num">3</div>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report lacks %q", want)
+		}
+	}
+	// The highest severity comes first inside the row.
+	if strings.Index(out, "<code>CVE-2021-44228</code>") > strings.Index(out, "<code>CVE-2021-45046</code>") {
+		t.Error("advisories are ordered by severity")
 	}
 }

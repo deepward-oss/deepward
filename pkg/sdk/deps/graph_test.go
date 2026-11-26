@@ -72,8 +72,18 @@ func TestPathsAndAncestors(t *testing.T) {
 	if g.Paths(app, 0) != nil || g.Paths("missing", 0) != nil {
 		t.Error("root/missing have no paths")
 	}
-	if got := g.DirectAncestors(log4j); !reflect.DeepEqual(got, []string{a, cats}) {
+	// cats reaches log4j in one step, a in two: closest first, not alphabetical.
+	if got := g.DirectAncestors(log4j); !reflect.DeepEqual(got, []string{cats, a}) {
 		t.Errorf("ancestors: %v", got)
+	}
+	if got := g.Chain(a, log4j); !reflect.DeepEqual(got, []string{a, b, log4j}) {
+		t.Errorf("chain: %v", got)
+	}
+	if got := g.Chain(a, a); !reflect.DeepEqual(got, []string{a}) {
+		t.Errorf("chain to self: %v", got)
+	}
+	if g.Chain(cats, a) != nil || g.Chain(a, "missing") != nil {
+		t.Error("unreachable chains are nil")
 	}
 	if got := g.DirectAncestors(a); !reflect.DeepEqual(got, []string{a}) {
 		t.Errorf("direct node is its own ancestor: %v", got)

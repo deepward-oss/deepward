@@ -25,6 +25,8 @@ type Value struct {
 type Dependency struct {
 	GroupID, ArtifactID, Version Value
 	Scope, Type, Classifier      string
+	// Optional is the text of <optional> ("true" for optional dependencies).
+	Optional string
 	// Element is the span of the whole <dependency> element.
 	Element Span
 }
@@ -179,6 +181,8 @@ func assign(pom *POM, dep *Dependency, stack []string, v Value) {
 			dep.Type = v.Text
 		case "classifier":
 			dep.Classifier = v.Text
+		case "optional":
+			dep.Optional = v.Text
 		}
 	}
 }

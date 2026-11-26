@@ -72,6 +72,30 @@ plugins:
 A repository that answers 5xx is retried three times. If it still fails,
 affected updates are reported as unknown and the scan continues.
 
+## Fixing transitive vulnerabilities
+
+When a vulnerable package comes in transitively, deepward looks for an
+upgrade of a direct dependency that brings a fixed version. It reads the
+published POMs of the newer versions of that dependency from the same
+repositories (with their parent POMs, properties, `dependencyManagement` and
+imported BOMs) and follows the dependency chain down to the vulnerable
+package. The report then names the oldest version that brings a fix, for
+example:
+
+> upgrade org.apache.kafka:kafka-clients from 4.4.0 to 4.5.0: it brings
+> at.yawk.lz4:lz4-java 1.11.4, which fixes these advisories (or pin
+> at.yawk.lz4:lz4-java to 1.11.4)
+
+The closest direct dependency is checked first: when a package is reachable
+through several direct dependencies, the one with the shortest chain decides
+its version. If no released version brings a fix, the recommendation is to pin
+the transitive version in the `dependencyManagement` of the root POM. If the
+direct dependency is not in any configured repository (an internal library),
+the report says so: add the repository that publishes it under
+`plugins.maven.repositories`. The POMs only tell what a version asks for, so
+`deepward fix` still rebuilds the dependency graph to verify the change
+against the whole project.
+
 ## Failure handling
 
 - If `mvn` is missing or too old, Maven projects are skipped with reason

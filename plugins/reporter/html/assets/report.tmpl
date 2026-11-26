@@ -51,10 +51,10 @@
 <section id="vulnerabilities">
   <h2>Vulnerabilities <span class="count" data-count-for="vulns">{{len .Vulns}}</span></h2>
   {{if .Vulns}}
-  <p class="muted">{{range $i, $c := .VulnCounts}}{{if $i}} · {{end}}{{$c.Count}} {{$c.Name}}{{end}}</p>
+  <p class="muted">{{.VulnAdvisories}} advisories in {{len .Vulns}} package version(s): {{range $i, $c := .VulnCounts}}{{if $i}} · {{end}}{{$c.Count}} {{$c.Name}}{{end}}</p>
   <table class="findings" id="vulns">
     <thead><tr>
-      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Advisory</th><th data-sort="text">Package</th>
+      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Advisories</th><th data-sort="text">Package</th>
       <th data-sort="text">Project</th><th data-sort="text">Dependency</th><th data-sort="text">Fixed in</th>
     </tr></thead>
     {{template "vulnrows" .Vulns}}
@@ -66,10 +66,10 @@
 <section id="not-built" class="notbuilt">
   <h2>Not built <span class="count" data-count-for="vulns-notbuilt">{{len .NotBuiltVulns}}</span></h2>
   <p class="explain">These packages are resolved dependencies of the project (they are in its lockfile or module graph) but are <strong>not compiled into it</strong>, so the vulnerable code does not ship. They do not count toward the quality gate, and their fixes are not urgent. Update them anyway to keep the dependency files clean for other scanners and audits: <code>deepward fix</code> prepares the changes.</p>
-  <p class="muted">{{range $i, $c := .NotBuiltCounts}}{{if $i}} · {{end}}{{$c.Count}} {{$c.Name}}{{end}}</p>
+  <p class="muted">{{.NotBuiltAdvisories}} advisories in {{len .NotBuiltVulns}} package version(s): {{range $i, $c := .NotBuiltCounts}}{{if $i}} · {{end}}{{$c.Count}} {{$c.Name}}{{end}}</p>
   <table class="findings" id="vulns-notbuilt">
     <thead><tr>
-      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Advisory</th><th data-sort="text">Package</th>
+      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Advisories</th><th data-sort="text">Package</th>
       <th data-sort="text">Project</th><th data-sort="text">Dependency</th><th data-sort="text">Fixed in</th>
     </tr></thead>
     {{template "vulnrows" .NotBuiltVulns}}
@@ -149,30 +149,36 @@
 </body>
 </html>
 {{define "vulnrows"}}{{range .}}
-    <tbody class="item" data-project="{{.Project}}" data-ecosystem="{{.Ecosystem}}" data-severity="{{.Severity}}" data-direct="{{if .Direct}}direct{{else}}transitive{{end}}" data-built="{{if .NotBuilt}}not-built{{else}}built{{end}}" data-search="{{.Search}}" data-rank="{{.Rank}}">
+    <tbody class="item" data-project="{{.Project}}" data-ecosystem="{{.Ecosystem}}" data-severity="{{.Severity}}" data-findings="{{.Findings}}" data-direct="{{if .Direct}}direct{{else}}transitive{{end}}" data-built="{{if .NotBuilt}}not-built{{else}}built{{end}}" data-search="{{.Search}}" data-rank="{{.Rank}}">
       <tr class="main">
-        <td><span class="badge sev-{{.Severity}}">{{.Severity}}</span>{{with .Score}} <span class="muted">{{.}}</span>{{end}}</td>
-        <td><button type="button" class="toggle" aria-expanded="true">{{.ID}}</button>{{with .Aliases}}<div class="muted small">{{join . ", "}}</div>{{end}}</td>
+        <td><span class="badge sev-{{.Severity}}">{{.Severity}}</span></td>
+        <td><button type="button" class="toggle" aria-expanded="true">{{len .Advisories}} {{if eq (len .Advisories) 1}}advisory{{else}}advisories{{end}}</button><div class="muted small">{{join .IDs ", "}}</div></td>
         <td><code>{{.Package}}</code> <span class="ver">{{.Version}}</span>{{if .NotBuilt}} <span class="badge notbuilt" title="Resolved but not compiled into the project">not built</span>{{end}}</td>
         <td>{{.Project}}</td>
         <td>{{if .Direct}}direct{{else}}transitive{{end}}{{with .Scope}} <span class="muted">({{.}})</span>{{end}}</td>
         <td>{{if .FixedIn}}<code>{{.FixedIn}}</code>{{else if .NoFix}}<span class="muted">no fix</span>{{end}}</td>
       </tr>
       <tr class="detail"><td colspan="6">
-        {{with .Title}}<p class="title">{{.}}</p>{{end}}
         <dl class="kv">
-          {{with .Vector}}<dt>CVSS</dt><dd><code>{{.}}</code></dd>{{end}}
-          {{with .Affected}}<dt>Affected</dt><dd>{{range .}}<code>{{.}}</code> {{end}}</dd>{{end}}
-          {{with .FixedIn}}<dt>Fixed in</dt><dd><code>{{.}}</code></dd>{{end}}
-          {{with .Paths}}<dt>Dependency path</dt><dd><ul class="paths">{{range .}}<li>{{.}}</li>{{end}}</ul></dd>{{end}}
+          {{with .FixedIn}}<dt>Fixed in</dt><dd><code>{{.}}</code> <span class="muted">(fixes all advisories below)</span></dd>{{end}}
           {{with .Recommendation}}<dt>Recommended action</dt><dd>{{.}}</dd>{{end}}
+          {{with .Paths}}<dt>Dependency path</dt><dd><ul class="paths">{{range .}}<li>{{.}}</li>{{end}}</ul></dd>{{end}}
           <dt>Declared in</dt><dd><code>{{.Location}}</code></dd>
-          {{with .Sources}}<dt>Sources</dt><dd>{{.}}</dd>{{end}}
-          {{with .Published}}<dt>Published</dt><dd>{{.}}</dd>{{end}}
-          {{with .References}}<dt>References</dt><dd><ul class="refs">{{range .}}<li><a href="{{.URL}}" rel="noopener noreferrer">{{.URL}}</a></li>{{end}}</ul></dd>{{end}}
         </dl>
-        {{with .Details}}<details class="desc"><summary>Description</summary><pre>{{.}}</pre></details>{{end}}
+        {{range .Advisories}}
+        <section class="advisory">
+          <h4><span class="badge sev-{{.Severity}}">{{.Severity}}</span>{{with .Score}} <span class="muted">{{.}}</span>{{end}} <code>{{.ID}}</code>{{with .Aliases}} <span class="muted small">{{join . ", "}}</span>{{end}}</h4>
+          {{with .Title}}<p class="title">{{.}}</p>{{end}}
+          <dl class="kv">
+            {{with .Vector}}<dt>CVSS</dt><dd><code>{{.}}</code></dd>{{end}}
+            {{with .Affected}}<dt>Affected</dt><dd>{{range .}}<code>{{.}}</code> {{end}}</dd>{{end}}
+            {{with .Sources}}<dt>Sources</dt><dd>{{.}}</dd>{{end}}
+            {{with .Published}}<dt>Published</dt><dd>{{.}}</dd>{{end}}
+            {{with .References}}<dt>References</dt><dd><ul class="refs">{{range .}}<li><a href="{{.URL}}" rel="noopener noreferrer">{{.URL}}</a></li>{{end}}</ul></dd>{{end}}
+          </dl>
+          {{with .Details}}<details class="desc"><summary>Description</summary><pre>{{.}}</pre></details>{{end}}
+        </section>
+        {{end}}
       </td></tr>
     </tbody>
 {{end}}{{end}}
-

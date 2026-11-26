@@ -7,6 +7,29 @@ All notable changes to Deepward are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-26
+
+### Changed
+
+- The HTML report shows one row per vulnerable package version, with all of
+  its advisories inside, instead of one row per advisory. JSON and SARIF still
+  carry one finding per advisory, so suppressions and the quality gate are
+  unchanged.
+- For a transitive vulnerability, the closest direct dependency is now the
+  one recommended for an upgrade (it used to be the alphabetically first one).
+- SDK 0.2.0: `deps.Graph.DirectAncestors` returns the closest ancestors
+  first instead of sorting them by ID.
+
+### Added
+
+- Maven: the recommendation for a transitive vulnerability names the oldest
+  version of the direct dependency whose published POM brings a fixed version
+  (`ancestorUpgrade` in the finding properties), and `deepward fix` tries that
+  version first. When no release brings a fix, or the direct dependency is not
+  in any configured repository, the report says so and recommends a pin.
+- SDK: `deps.DependencyLister`, optionally implemented by version registries,
+  lists the dependencies a published package version declares.
+
 ## [0.1.0] - 2026-11-26
 
 First public release.
@@ -43,5 +66,6 @@ First public release.
   container image at `ghcr.io/deepward-oss/deepward`, SBOMs and build
   provenance attestations.
 
-[Unreleased]: https://github.com/deepward-oss/deepward/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/deepward-oss/deepward/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/deepward-oss/deepward/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deepward-oss/deepward/releases/tag/v0.1.0

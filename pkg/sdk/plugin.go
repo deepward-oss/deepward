@@ -17,7 +17,7 @@ import (
 )
 
 // SDKVersion is the version of the plugin contracts.
-const SDKVersion = "0.1.0"
+const SDKVersion = "0.2.0"
 
 // BuiltinVersion is the Info.Version of plugins shipped with Deepward. They
 // are versioned with Deepward itself, and tools show the Deepward version

@@ -40,7 +40,7 @@ build provenance attestations:
 
 ```sh
 sha256sum --check --ignore-missing checksums.txt
-gh attestation verify deepward_0.1.0_linux_amd64.tar.gz --repo deepward-oss/deepward
+gh attestation verify deepward_0.2.0_linux_amd64.tar.gz --repo deepward-oss/deepward
 ```
 
 The container image (linux/amd64 and linux/arm64) has only the static
@@ -49,7 +49,7 @@ Maven, sbt, .NET and Go need their build tools, so copy the binary into an
 image that has them:
 
 ```sh
-docker run --rm -v "$PWD:/src" -w /src ghcr.io/deepward-oss/deepward:0.1.0 scan
+docker run --rm -v "$PWD:/src" -w /src ghcr.io/deepward-oss/deepward:0.2.0 scan
 ```
 
 ```dockerfile
@@ -59,7 +59,7 @@ COPY --from=ghcr.io/deepward-oss/deepward:0.1 /deepward /usr/local/bin/deepward
 With Go 1.26 or later:
 
 ```sh
-go install github.com/deepward-oss/deepward/cmd/deepward@v0.1.0
+go install github.com/deepward-oss/deepward/cmd/deepward@v0.2.0
 ```
 
 Versions follow SemVer; see [docs/versioning.md](docs/versioning.md) and the

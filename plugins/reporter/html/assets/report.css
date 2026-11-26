@@ -61,6 +61,8 @@ tbody.item.hidden { display: none; }
 .kv dd { margin: 0; }
 .kv ul { margin: 0; padding-left: 18px; }
 .title { font-weight: 600; margin: 0 0 8px; }
+section.advisory { border: 0; border-top: 1px solid var(--border); border-radius: 0; padding: 12px 0 0; margin-top: 12px; background: transparent; }
+section.advisory h4 { margin: 0 0 6px; font-size: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
 .empty { color: var(--muted); font-style: italic; }
 .status-failed td:nth-child(2) { color: var(--high); font-weight: 600; }
 .status-skipped td:nth-child(2) { color: var(--medium); font-weight: 600; }

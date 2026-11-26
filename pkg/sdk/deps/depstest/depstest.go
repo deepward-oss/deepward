@@ -111,6 +111,29 @@ func (e *Ecosystem) Versions(ctx context.Context, p sdk.Project, pkg string) ([]
 	return e.Registry.List(ctx, p, pkg)
 }
 
+// ListingEcosystem is an Ecosystem that also implements deps.DependencyLister.
+type ListingEcosystem struct {
+	Ecosystem
+	// Deps maps "purl@version" (purl without version) to the dependencies
+	// that version declares.
+	Deps map[string]map[string]string
+	// Calls counts Dependencies calls.
+	Calls atomic.Int64
+}
+
+// Dependencies implements deps.DependencyLister.
+func (e *ListingEcosystem) Dependencies(ctx context.Context, _ sdk.Project, pkg, version string) (map[string]string, error) {
+	e.Calls.Add(1)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	d, ok := e.Deps[pkg+"@"+version]
+	if !ok {
+		return nil, deps.ErrPackageNotFound
+	}
+	return d, nil
+}
+
 // TestAdvisorySource checks an advisory source with a query that should
 // return results.
 func TestAdvisorySource(t *testing.T, s deps.AdvisorySource, queries []deps.PackageQuery) []deps.Advisory {

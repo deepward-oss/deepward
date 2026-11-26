@@ -21,11 +21,15 @@ The HTML report SHALL contain a summary (finding counts by severity, by project,
 
 #### Scenario: Severity summary
 - **WHEN** 2 critical, 5 high and 1 medium findings exist
-- **THEN** the report header shows these counts and they match the vulnerability table rows per severity
+- **THEN** the report header shows these counts and they match the advisories in the vulnerability table per severity
+
+#### Scenario: Advisories of one package version
+- **WHEN** three advisories affect `lz4-java 1.11.2` in one project
+- **THEN** the HTML vulnerability table shows one row for `lz4-java 1.11.2` with the highest severity, the three advisory IDs, one fixed version and one recommended action, and the expanded row lists each advisory with its own severity, details and references; the severity filter matches the row if any of its advisories has that severity, and JSON and SARIF keep one finding per advisory
 
 #### Scenario: Finding details
 - **WHEN** the user expands a vulnerability row
-- **THEN** it shows identifiers and aliases linked to their source, description, CVSS, affected versions, fixed version, the dependency path from root to package, and the recommended action
+- **THEN** it shows the fixed version, the dependency path from root to package and the recommended action, and for each advisory its identifiers and aliases linked to their source, description, CVSS and affected versions
 
 ### Requirement: HTML report interactivity
 The HTML report SHALL support filtering by project, ecosystem, severity and dependency type (direct or transitive), column sorting, and text search by package name and advisory ID. Without JavaScript it SHALL remain readable as static tables.
