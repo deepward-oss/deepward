@@ -158,13 +158,14 @@ func (r *Resolver) loadModel(ctx context.Context, group, artifact, version strin
 	for _, d := range pom.Dependencies {
 		own[d.Coordinates()] = true
 	}
-	inherited := m.deps[:0:0]
+	deps := make([]Dependency, 0, len(m.deps)+len(pom.Dependencies))
 	for _, d := range m.deps {
 		if !own[d.Coordinates()] {
-			inherited = append(inherited, d)
+			deps = append(deps, d)
 		}
 	}
-	m.deps = append(inherited, pom.Dependencies...)
+	deps = append(deps, pom.Dependencies...)
+	m.deps = deps
 	return m, nil
 }
 
