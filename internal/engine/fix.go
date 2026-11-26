@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/deepward-oss/deepward/internal/textedit"
 	"github.com/deepward-oss/deepward/pkg/sdk"
@@ -81,6 +82,12 @@ type FixPlan struct {
 	ChangeSets []ChangeSet     `json:"changeSets"`
 	Manual     []ManualFix     `json:"manual"`
 	Failed     []FailedFix     `json:"failed"`
+	// Filtered is the number of findings with remediations that fix.kinds
+	// or fix.minSeverity left out.
+	Filtered int `json:"filtered,omitempty"`
+	// excluded holds "project\x00group" of the groups made only of
+	// filtered findings: Publish leaves their open requests alone.
+	excluded map[string]bool
 }
 
 // target is a set of findings sharing the same remediation alternatives.
@@ -116,20 +123,22 @@ func (e *Engine) PlanFixes(ctx context.Context) (*FixPlan, error) {
 			projects[p.ID] = p.Project
 		}
 	}
-	for _, g := range e.groups(res, projects) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+	groups, excluded, filtered := e.groups(res, projects)
+	plan.excluded, plan.Filtered = excluded, filtered
+	e.progress(ctx, "verifying fixes", "groups", len(groups), "filtered", filtered)
+	start := e.clock.Now()
+	for _, o := range e.fixGroups(ctx, groups) {
+		if o.err != nil {
+			return nil, o.err
 		}
-		cs, manual, failed, err := e.fixGroup(ctx, g)
-		if err != nil {
-			return nil, err
-		}
-		plan.Manual = append(plan.Manual, manual...)
-		plan.Failed = append(plan.Failed, failed...)
-		if cs != nil {
-			plan.ChangeSets = append(plan.ChangeSets, *cs)
+		plan.Manual = append(plan.Manual, o.manual...)
+		plan.Failed = append(plan.Failed, o.failed...)
+		if o.cs != nil {
+			plan.ChangeSets = append(plan.ChangeSets, *o.cs)
 		}
 	}
+	e.progress(ctx, "fixes verified", "changeSets", len(plan.ChangeSets), "manual", len(plan.Manual), "failed", len(plan.Failed),
+		"duration", e.since(start))
 	sortChangeSets(plan.ChangeSets)
 	if err := e.checkBranches(plan.ChangeSets); err != nil {
 		return nil, err
@@ -151,6 +160,94 @@ func sortChangeSets(cs []ChangeSet) {
 		}
 		return a.Branch < b.Branch
 	})
+}
+
+type groupOutcome struct {
+	cs     *ChangeSet
+	manual []ManualFix
+	failed []FailedFix
+	err    error
+}
+
+// fixGroups verifies the groups with fix.concurrency workers. Each worker
+// copies a project once and reuses the copy for all of its groups of that
+// project, restoring the edited files in between. Outcomes keep the order
+// of the groups.
+func (e *Engine) fixGroups(ctx context.Context, groups []*fixGroup) []groupOutcome {
+	out := make([]groupOutcome, len(groups))
+	workers := e.cfg.Fix.Concurrency
+	if workers <= 0 {
+		workers = DefaultFixConcurrency
+	}
+	workers = min(workers, len(groups))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			copies := map[string]*scratch{}
+			defer func() {
+				for _, sc := range copies {
+					sc.close()
+				}
+			}()
+			for i := range jobs {
+				out[i] = e.fixGroupIn(ctx, copies, groups[i], fmt.Sprintf("%d/%d", i+1, len(groups)))
+			}
+		}()
+	}
+	for i := range groups {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return out
+}
+
+// fixGroupIn verifies one group in the worker's copy of its project.
+func (e *Engine) fixGroupIn(ctx context.Context, copies map[string]*scratch, g *fixGroup, progress string) groupOutcome {
+	if err := ctx.Err(); err != nil {
+		return groupOutcome{err: err}
+	}
+	sc := copies[g.project.ID]
+	if sc == nil {
+		var err error
+		if sc, err = e.newScratch(g.project); err != nil {
+			return groupOutcome{err: err}
+		}
+		copies[g.project.ID] = sc
+	}
+	start := e.clock.Now()
+	e.progress(ctx, "verifying fix group", "group", g.name, "project", g.project.ID, "progress", progress)
+	var o groupOutcome
+	o.cs, o.manual, o.failed, o.err = e.fixGroup(ctx, sc, g)
+	if err := sc.reset(); err != nil && o.err == nil {
+		o.err = err
+	}
+	result := "change set ready"
+	if o.cs == nil {
+		result = "no verified change"
+	}
+	e.progress(ctx, "fix group done", "group", g.name, "project", g.project.ID, "result", result, "duration", e.since(start))
+	return o
+}
+
+// fixable reports whether a finding passes fix.kinds and fix.minSeverity.
+func (e *Engine) fixable(f sdk.Finding) bool {
+	if kinds := e.cfg.Fix.Kinds; len(kinds) > 0 {
+		ok := false
+		for _, k := range kinds {
+			ok = ok || strings.EqualFold(string(k), string(f.Kind))
+		}
+		if !ok {
+			return false
+		}
+	}
+	if least := e.cfg.Fix.MinSeverity; least != "" && f.Severity.Normalize().Rank() < least.Normalize().Rank() {
+		return false
+	}
+	return true
 }
 
 func (e *Engine) groupName(f sdk.Finding, r sdk.Remediation) string {
@@ -203,10 +300,15 @@ func altKey(alts []sdk.Remediation) string {
 	return sb.String()
 }
 
-func (e *Engine) groups(res *sdk.ScanResult, projects map[string]sdk.Project) []*fixGroup {
+// groups builds the fix groups of the findings that pass the fix filters.
+// It also returns the groups made only of filtered findings and the number
+// of filtered findings.
+func (e *Engine) groups(res *sdk.ScanResult, projects map[string]sdk.Project) ([]*fixGroup, map[string]bool, int) {
 	byKey := map[string]*fixGroup{}
 	var order []string
 	targets := map[string]*target{}
+	excluded := map[string]bool{}
+	filtered := 0
 	for _, f := range res.Findings {
 		if f.Suppression != nil || len(f.Remediations) == 0 {
 			continue
@@ -217,6 +319,11 @@ func (e *Engine) groups(res *sdk.ScanResult, projects map[string]sdk.Project) []
 		}
 		name := e.groupName(f, f.Remediations[0])
 		key := p.ID + "\x00" + name
+		if !e.fixable(f) {
+			filtered++
+			excluded[key] = true
+			continue
+		}
 		g, ok := byKey[key]
 		if !ok {
 			g = &fixGroup{project: p, name: name}
@@ -236,8 +343,9 @@ func (e *Engine) groups(res *sdk.ScanResult, projects map[string]sdk.Project) []
 	out := make([]*fixGroup, 0, len(order))
 	for _, k := range order {
 		out = append(out, byKey[k])
+		delete(excluded, k)
 	}
-	return mergeUpdates(out)
+	return mergeUpdates(out), excluded, filtered
 }
 
 // changeKey identifies a package change of a project: the package and the
@@ -304,6 +412,10 @@ func mergeUpdates(groups []*fixGroup) []*fixGroup {
 type scratch struct {
 	ws       *sdk.Workspace
 	original map[string][]byte
+	// touched lists the files edited since the copy was made or reset.
+	touched map[string]bool
+	// cache holds verification scans by project, file contents and analyzers.
+	cache map[string]*sdk.ScanResult
 }
 
 func (e *Engine) newScratch(p sdk.Project) (*scratch, error) {
@@ -311,7 +423,8 @@ func (e *Engine) newScratch(p sdk.Project) (*scratch, error) {
 	if err != nil {
 		return nil, err
 	}
-	sc := &scratch{ws: sdk.NewWorkspace(dir, e.ws.Exclude), original: map[string][]byte{}}
+	sc := &scratch{ws: sdk.NewWorkspace(dir, e.ws.Exclude), original: map[string][]byte{}, touched: map[string]bool{},
+		cache: map[string]*sdk.ScanResult{}}
 	copyFile := func(rel string) error {
 		data, err := fs.ReadFile(e.ws.FS, rel)
 		if err != nil {
@@ -358,6 +471,18 @@ func (e *Engine) newScratch(p sdk.Project) (*scratch, error) {
 
 func (s *scratch) close() { _ = os.RemoveAll(s.ws.Root) }
 
+// reset restores the files edited since the copy was made, so the copy can
+// serve the next group of the same project.
+func (s *scratch) reset() error {
+	for f := range s.touched {
+		if err := s.write(f, s.original[f]); err != nil {
+			return fmt.Errorf("restore %s: %w", f, err)
+		}
+	}
+	s.touched = map[string]bool{}
+	return nil
+}
+
 func (s *scratch) read(rel string) ([]byte, error) {
 	return os.ReadFile(filepath.Join(s.ws.Root, filepath.FromSlash(rel)))
 }
@@ -383,6 +508,7 @@ func (s *scratch) apply(edits []sdk.TextEdit) (map[string][]byte, error) {
 			return prev, err
 		}
 		prev[file] = cur
+		s.touched[file] = true
 		if err := s.write(file, next); err != nil {
 			return prev, err
 		}
@@ -440,7 +566,7 @@ func (e *Engine) realize(ctx context.Context, sc *scratch, p sdk.Project, r sdk.
 
 // verify rescans the scratch copy and reports whether the targeted findings
 // are gone and the project still builds.
-func (e *Engine) verify(ctx context.Context, sc *scratch, p sdk.Project, findings []sdk.Finding, cache map[string]*sdk.ScanResult) (bool, string, error) {
+func (e *Engine) verify(ctx context.Context, sc *scratch, p sdk.Project, findings []sdk.Finding) (bool, string, error) {
 	analyzers := map[string]bool{}
 	for _, f := range findings {
 		analyzers[f.Analyzer] = true
@@ -450,15 +576,15 @@ func (e *Engine) verify(ctx context.Context, sc *scratch, p sdk.Project, finding
 		ids = append(ids, a)
 	}
 	sort.Strings(ids)
-	key := sc.hash() + strings.Join(ids, ",")
-	res, ok := cache[key]
+	key := p.ID + "\x00" + sc.hash() + strings.Join(ids, ",")
+	res, ok := sc.cache[key]
 	if !ok {
 		var err error
-		res, err = e.ScanWorkspace(ctx, sc.ws, ScanFilter{Projects: []string{p.ID}, Analyzers: ids})
+		res, err = e.ScanWorkspace(withoutProgress(ctx), sc.ws, ScanFilter{Projects: []string{p.ID}, Analyzers: ids})
 		if err != nil {
 			return false, "", err
 		}
-		cache[key] = res
+		sc.cache[key] = res
 	}
 	for _, pr := range res.Projects {
 		if pr.ID == p.ID && pr.Status != sdk.ProjectOK {
@@ -477,20 +603,14 @@ func (e *Engine) verify(ctx context.Context, sc *scratch, p sdk.Project, finding
 	return true, "", nil
 }
 
-func (e *Engine) fixGroup(ctx context.Context, g *fixGroup) (*ChangeSet, []ManualFix, []FailedFix, error) {
-	sc, err := e.newScratch(g.project)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	defer sc.close()
-	cache := map[string]*sdk.ScanResult{}
+func (e *Engine) fixGroup(ctx context.Context, sc *scratch, g *fixGroup) (*ChangeSet, []ManualFix, []FailedFix, error) {
 	cs := &ChangeSet{Project: g.project, Group: g.name}
 	var manual []ManualFix
 	var failed []FailedFix
 	for _, t := range g.targets {
 		if t.upgrade != nil {
 			all := append(append([]sdk.Finding{}, t.findings...), t.upgradeFindings...)
-			it, m, why, err := e.attempt(ctx, sc, g.project, []sdk.Remediation{*t.upgrade}, all, cache)
+			it, m, why, err := e.attempt(ctx, sc, g.project, []sdk.Remediation{*t.upgrade}, all)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -506,7 +626,7 @@ func (e *Engine) fixGroup(ctx context.Context, g *fixGroup) (*ChangeSet, []Manua
 			// to the security fix alone.
 			manual, failed = report(manual, failed, g.project.ID, t.upgradeGroup, t.upgradeFindings[0], m, why)
 		}
-		it, m, why, err := e.attempt(ctx, sc, g.project, t.alternatives, t.findings, cache)
+		it, m, why, err := e.attempt(ctx, sc, g.project, t.alternatives, t.findings)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -547,8 +667,8 @@ func (e *Engine) fixGroup(ctx context.Context, g *fixGroup) (*ChangeSet, []Manua
 // attempt applies the first alternative that clears every finding and keeps
 // the project building. Without one, it returns the last manual change or
 // verification failure.
-func (e *Engine) attempt(ctx context.Context, sc *scratch, p sdk.Project, alternatives []sdk.Remediation, findings []sdk.Finding,
-	cache map[string]*sdk.ScanResult) (*FixItem, *sdk.ManualChange, string, error) {
+func (e *Engine) attempt(ctx context.Context, sc *scratch, p sdk.Project, alternatives []sdk.Remediation,
+	findings []sdk.Finding) (*FixItem, *sdk.ManualChange, string, error) {
 	var lastManual *sdk.ManualChange
 	var lastFailure string
 	for _, alt := range alternatives {
@@ -563,15 +683,19 @@ func (e *Engine) attempt(ctx context.Context, sc *scratch, p sdk.Project, altern
 			lastFailure = err.Error()
 			continue
 		}
-		ok, why, err := e.verify(ctx, sc, p, findings, cache)
+		start := e.clock.Now()
+		e.progress(ctx, "verifying change", "project", p.ID, "change", alt.Description)
+		ok, why, err := e.verify(ctx, sc, p, findings)
 		if err != nil {
 			return nil, nil, "", err
 		}
 		if !ok {
 			sc.rollback(prev)
 			lastFailure = why
+			e.progress(ctx, "change rejected", "project", p.ID, "change", alt.Description, "reason", why, "duration", e.since(start))
 			continue
 		}
+		e.progress(ctx, "change verified", "project", p.ID, "change", alt.Description, "duration", e.since(start))
 		it := itemFor(alt, findings)
 		return &it, nil, "", nil
 	}

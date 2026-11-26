@@ -121,6 +121,9 @@ fix:
   labels: [dependencies]
   securityLabels: [security]
   maxCandidates: 5
+  minSeverity: high             # fix only findings at or above this severity
+  kinds: [vulnerability]        # fix only these finding kinds (default: all)
+  concurrency: 2                # change groups verified in parallel
   groups:
     - name: jackson
       match: ["pkg:maven/com.fasterxml.jackson*/*"]
@@ -129,6 +132,67 @@ platform:
   apiUrl: https://git.acme.local/api/v4
   repo: team/billing
 ```
+
+### Which findings get change requests
+
+By default every finding with a fix gets a change request: vulnerabilities
+of any severity and updates of outdated dependencies. Two keys narrow this:
+
+- `minSeverity` keeps findings at or above a severity (`critical`, `high`,
+  `medium`, `low`). Updates of outdated dependencies have no severity, so any
+  value leaves them out. `deepward fix --min-severity critical` overrides it
+  for one run.
+- `kinds` keeps findings of the listed kinds: `vulnerability`, `outdated`,
+  `code-issue`, ...
+
+Only critical vulnerabilities:
+
+```yaml
+fix:
+  minSeverity: critical
+```
+
+Only updates, no security fixes:
+
+```yaml
+fix:
+  kinds: [outdated]
+```
+
+Open requests of the findings that are left out are neither updated nor
+closed: they stay as they are until you close them or widen the filters.
+
+### Speed
+
+Every change is verified by building the dependency graph again in a copy of
+the project, so a fix run takes about one build per change group, plus one
+per rejected alternative. `concurrency` (default 2) verifies that many groups
+at a time, each with its own copy of the project and its own build process;
+raise it on machines with spare CPU and memory. Narrowing the findings with
+`minSeverity` or `kinds` cuts the number of builds the most.
+
+## Logging
+
+```yaml
+log:
+  level: info        # debug, info, warn or error
+  format: text       # text or json
+  progress: true     # log what scan and fix are doing
+```
+
+Logs go to stderr. With `progress` (the default), `deepward scan` and
+`deepward fix` log the projects they found, each dependency graph and
+analyzer with its duration, and every change `deepward fix` verifies with its
+result, so a long run shows where the time goes:
+
+```text
+level=INFO msg="verifying fix group" group=security/at.yawk.lz4:lz4-java project=maven:. progress=1/3
+level=INFO msg="verifying change" project=maven:. change="upgrade org.apache.kafka:kafka-clients 4.4.0 → 4.5.0 to bring at.yawk.lz4:lz4-java 1.11.4"
+level=INFO msg="change verified" project=maven:. change="upgrade org.apache.kafka:kafka-clients 4.4.0 → 4.5.0 to bring at.yawk.lz4:lz4-java 1.11.4" duration=41.2s
+```
+
+`--log-format` overrides `format`, and `--quiet` raises the level to `warn`,
+which hides progress.
 
 `grouping` decides how many change requests are opened:
 

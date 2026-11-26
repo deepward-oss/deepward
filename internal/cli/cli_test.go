@@ -511,3 +511,42 @@ func TestBuiltinVersionAndVersionFlag(t *testing.T) {
 		t.Errorf("--version: %d %q", code, h.stdout.String())
 	}
 }
+
+func TestLogConfig(t *testing.T) {
+	h := newHarness(t, analyzer(sdk.SeverityHigh))
+	h.write("deepward.yaml", "log:\n  format: json\n")
+	h.run("scan")
+	if !strings.Contains(h.stderr.String(), `"msg":"scan finished"`) {
+		t.Errorf("log.format json with progress:\n%s", h.stderr.String())
+	}
+	h.stderr.Reset()
+	h.run("scan", "--log-format", "text")
+	if !strings.Contains(h.stderr.String(), "msg=\"scan finished\"") {
+		t.Errorf("--log-format overrides log.format:\n%s", h.stderr.String())
+	}
+	h.write("deepward.yaml", "log:\n  progress: false\n")
+	h.stderr.Reset()
+	h.run("scan")
+	if strings.Contains(h.stderr.String(), "scan finished") {
+		t.Errorf("log.progress false:\n%s", h.stderr.String())
+	}
+	h.write("deepward.yaml", "log:\n  level: warn\n")
+	h.stderr.Reset()
+	h.run("scan")
+	if strings.Contains(h.stderr.String(), "scan finished") {
+		t.Errorf("log.level warn hides progress:\n%s", h.stderr.String())
+	}
+	h.write("deepward.yaml", "log:\n  level: debug\n")
+	h.stderr.Reset()
+	h.run("scan", "-q")
+	if strings.Contains(h.stderr.String(), "scan finished") {
+		t.Errorf("--quiet hides progress:\n%s", h.stderr.String())
+	}
+	h.write("deepward.yaml", "fix:\n  limit: 1\n")
+	if code := h.run("fix", "--min-severity", "urgent"); code != ExitUsage {
+		t.Errorf("bad --min-severity: %d", code)
+	}
+	if code := h.run("fix", "--min-severity", "critical"); code != ExitOK {
+		t.Errorf("--min-severity critical: %d\n%s", code, h.stderr.String())
+	}
+}

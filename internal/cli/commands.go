@@ -185,5 +185,7 @@ func newFixCmd(env Env, g *globalOpts) *cobra.Command {
 	}
 	r.register(cmd, false)
 	f.register(cmd)
+	cmd.Flags().StringVar(&r.minSeverity, "min-severity", "",
+		"fix only findings at or above this severity, e.g. critical (overrides fix.minSeverity; updates have no severity)")
 	return cmd
 }

@@ -61,6 +61,14 @@ Render HTML again from a saved JSON result:
 deepward report --from deepward-out/deepward-report.json --format html
 ```
 
+Prepare fixes only for critical vulnerabilities; add `--publish` to open
+the merge/pull requests (`fix.minSeverity` in the configuration does the same
+for every run):
+
+```sh
+deepward fix --min-severity critical
+```
+
 Inspect the setup:
 
 ```sh
@@ -97,7 +105,10 @@ See [configuration.md](configuration.md).
 
 - Reports go only to files.
 - A short summary goes to stdout (`--quiet` suppresses it).
-- Logs go to stderr (`--log-format json` switches them to JSON lines).
+- Logs go to stderr (`--log-format json` switches them to JSON lines). By
+  default they include progress: projects, dependency graphs, analyzers and
+  every change `deepward fix` verifies, with durations (`log` in
+  [configuration.md](configuration.md#logging)).
 - Colors are used only when stdout is a terminal and `NO_COLOR` is not set
   (`--no-color` disables them too).
 

@@ -110,6 +110,9 @@
         "branch": {
           "type": "string"
         },
+        "concurrency": {
+          "type": "integer"
+        },
         "grouping": {
           "enum": [
             "package",
@@ -136,6 +139,12 @@
           },
           "type": "array"
         },
+        "kinds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "labels": {
           "items": {
             "type": "string"
@@ -147,6 +156,17 @@
         },
         "maxCandidates": {
           "type": "integer"
+        },
+        "minSeverity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "unknown",
+            "none"
+          ],
+          "type": "string"
         },
         "securityLabels": {
           "items": {
@@ -188,6 +208,31 @@
     "integrations": {
       "additionalProperties": {
         "type": "object"
+      },
+      "type": "object"
+    },
+    "log": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "enum": [
+            "text",
+            "json"
+          ],
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "type": "string"
+        },
+        "progress": {
+          "type": "boolean"
+        }
       },
       "type": "object"
     },

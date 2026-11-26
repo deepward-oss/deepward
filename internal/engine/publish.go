@@ -235,7 +235,9 @@ func (e *Engine) Publish(ctx context.Context, client sdk.PlatformClient, plan *F
 	for _, b := range branches {
 		cr := byBranch[b]
 		mk, _ := ParseMarker(cr.Body)
-		if planned[b] || !scanned[mk.Project] || blocked[mk.Project+"\x00"+mk.Group] {
+		// Requests of groups that fix.kinds or fix.minSeverity leave out are
+		// not managed in this run: they stay as they are.
+		if planned[b] || !scanned[mk.Project] || blocked[mk.Project+"\x00"+mk.Group] || plan.excluded[mk.Project+"\x00"+mk.Group] {
 			continue
 		}
 		if err := client.Comment(ctx, cr.ID, closeComment(mk, carriedBy)); err != nil {

@@ -31,6 +31,7 @@ type Config struct {
 	Fix          FixConfig            `yaml:"fix"`
 	Platform     PlatformSettings     `yaml:"platform"`
 	Output       OutputConfig         `yaml:"output"`
+	Log          LogConfig            `yaml:"log"`
 	Cache        CacheConfig          `yaml:"cache"`
 	Offline      bool                 `yaml:"offline"`
 	// PluginTimeout bounds every plugin call (default 30m).
@@ -89,7 +90,36 @@ type FixConfig struct {
 	MaxCandidates int `yaml:"maxCandidates"`
 	// TargetBranch overrides the detected default branch.
 	TargetBranch string `yaml:"targetBranch"`
+	// MinSeverity limits fixes to findings at or above this severity.
+	// Updates of outdated dependencies have no severity, so any value leaves
+	// them out. Empty: findings of every severity.
+	MinSeverity sdk.Severity `yaml:"minSeverity"`
+	// Kinds limits fixes to findings of these kinds (vulnerability,
+	// outdated, ...). Empty: every kind.
+	Kinds []sdk.FindingKind `yaml:"kinds"`
+	// Concurrency is the number of change groups verified in parallel, each
+	// in its own copy of the project (default 2).
+	Concurrency int `yaml:"concurrency"`
 }
+
+// DefaultFixConcurrency is the default of fix.concurrency.
+const DefaultFixConcurrency = 2
+
+// LogConfig configures the diagnostics written to stderr.
+type LogConfig struct {
+	// Level is the minimum level: debug, info (default), warn or error.
+	// --quiet raises it to warn.
+	Level string `yaml:"level" enum:"debug,info,warn,error"`
+	// Format is text (default) or json; --log-format overrides it.
+	Format string `yaml:"format" enum:"text,json"`
+	// Progress logs what scan and fix are doing at info level: projects,
+	// dependency graphs, analyzers and every fix being verified, with
+	// durations (default true).
+	Progress *bool `yaml:"progress"`
+}
+
+// ProgressEnabled reports whether progress lines are logged.
+func (c LogConfig) ProgressEnabled() bool { return c.Progress == nil || *c.Progress }
 
 // GroupRule groups updates into one change request.
 type GroupRule struct {
@@ -162,6 +192,29 @@ func (c *Config) Validate() error {
 		if err := ValidateBranchTemplate(c.Fix.Branch); err != nil {
 			errs = append(errs, fmt.Errorf("fix.branch: %w", err))
 		}
+	}
+	if c.Fix.MinSeverity != "" {
+		if _, err := sdk.ParseSeverity(string(c.Fix.MinSeverity)); err != nil {
+			errs = append(errs, fmt.Errorf("fix.minSeverity: %w", err))
+		}
+	}
+	for i, k := range c.Fix.Kinds {
+		if k == "" {
+			errs = append(errs, fmt.Errorf("fix.kinds[%d] is empty", i))
+		}
+	}
+	if c.Fix.Concurrency < 0 {
+		errs = append(errs, errors.New("fix.concurrency must be >= 0"))
+	}
+	switch c.Log.Level {
+	case "", "debug", "info", "warn", "error":
+	default:
+		errs = append(errs, fmt.Errorf("log.level: %q is not one of debug, info, warn, error", c.Log.Level))
+	}
+	switch c.Log.Format {
+	case "", "text", "json":
+	default:
+		errs = append(errs, fmt.Errorf("log.format: %q is not one of text, json", c.Log.Format))
 	}
 	switch c.Fix.Grouping {
 	case "", GroupingPackage, GroupingType, GroupingProject:

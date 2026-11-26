@@ -313,3 +313,25 @@ type noTools struct{}
 func (noTools) Require(_ context.Context, req sdk.ToolRequirement, _ *sdk.Project) (sdk.Tool, error) {
 	return nil, &sdk.ToolError{Tool: req.Name, Reason: sdk.ErrToolNotFound, Detail: req.Name + " (no toolchain configured)"}
 }
+
+// noProgressKey marks a context whose scans log no progress (the nested
+// verification scans of the fix pipeline, which log their own).
+type noProgressKey struct{}
+
+func withoutProgress(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noProgressKey{}, true)
+}
+
+// progress logs what the engine is doing at info level, unless log.progress
+// is false or ctx belongs to a nested scan.
+func (e *Engine) progress(ctx context.Context, msg string, args ...any) {
+	if !e.cfg.Log.ProgressEnabled() || ctx.Value(noProgressKey{}) != nil {
+		return
+	}
+	e.log.InfoContext(ctx, msg, args...)
+}
+
+// since returns the time elapsed since start, rounded for logs.
+func (e *Engine) since(start time.Time) time.Duration {
+	return e.clock.Now().Sub(start).Round(10 * time.Millisecond)
+}

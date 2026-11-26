@@ -93,6 +93,8 @@ func (pf *projectFacts) produce(ctx context.Context, name string) (any, string, 
 		return nil, "", &sdk.FactError{Name: name, Reason: "no producer for this project"}
 	}
 	id := producer.Info().ID
+	pf.e.progress(ctx, "producing fact", "fact", name, "project", pf.project.ID, "plugin", id)
+	start := pf.e.clock.Now()
 	var val any
 	err := guard(ctx, pf.e.pluginTimeout(), func(ctx context.Context) error {
 		v, err := producer.Produce(ctx, sdk.FactRequest{Name: name, Project: pf.project, Workspace: pf.ws, Facts: pf})
@@ -111,6 +113,7 @@ func (pf *projectFacts) produce(ctx context.Context, name string) (any, string, 
 		run.Status, run.Reason = sdk.RunFailed, err.Error()
 	}
 	pf.runs.add(run)
+	pf.e.progress(ctx, "fact ready", "fact", name, "project", pf.project.ID, "status", run.Status, "duration", pf.e.since(start))
 	return val, id, err
 }
 

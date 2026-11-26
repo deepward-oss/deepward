@@ -90,6 +90,7 @@ func (e *Engine) ScanWorkspace(ctx context.Context, ws *sdk.Workspace, filter Sc
 	started := e.clock.Now()
 	runs := &runLog{}
 	projects := e.Detect(ctx, ws, runs)
+	e.progress(ctx, "projects detected", "count", len(projects))
 	var states []*projectState
 	for _, p := range projects {
 		if !filter.project(p.ID) {
@@ -100,6 +101,7 @@ func (e *Engine) ScanWorkspace(ctx context.Context, ws *sdk.Workspace, filter Sc
 		states = append(states, st)
 	}
 	findings := e.runAnalyzers(ctx, ws, states, filter, runs)
+	e.progress(ctx, "scan finished", "projects", len(states), "findings", len(findings), "duration", e.since(started))
 	res := &sdk.ScanResult{
 		SchemaVersion: sdk.SchemaVersion,
 		Tool:          e.opts.Tool,
@@ -236,6 +238,10 @@ func (e *Engine) runTask(ctx context.Context, ws *sdk.Workspace, t task, project
 		}
 	}
 	var found []sdk.Finding
+	start := e.clock.Now()
+	defer func() {
+		e.progress(ctx, "analyzer finished", "analyzer", id, "project", run.Project, "status", run.Status, "findings", len(found), "duration", e.since(start))
+	}()
 	err := guard(ctx, e.pluginTimeout(), func(ctx context.Context) error {
 		fs, err := t.analyzer.Analyze(ctx, req)
 		found = fs

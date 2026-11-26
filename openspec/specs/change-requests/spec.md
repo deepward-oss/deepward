@@ -56,6 +56,24 @@ Before publishing, the system SHALL rebuild the project's graph on the edited fi
 - **WHEN** the rebuilt graph still contains the vulnerable version after upgrading the direct dependency
 - **THEN** the change is not published and is marked `verification-failed`
 
+### Requirement: Parallel verification
+The system SHALL verify change groups with `fix.concurrency` workers (default 2). Each worker SHALL copy a project once, reuse the copy for every group of that project it verifies and restore the edited files between groups. The resulting plan SHALL not depend on the number of workers.
+
+#### Scenario: Same plan with any concurrency
+- **WHEN** the same workspace is fixed with `fix.concurrency` 1 and 8
+- **THEN** both runs produce the same change sets, diffs, manual fixes and failures, in the same order, and no change set carries another group's edit
+
+### Requirement: Choosing which findings get change requests
+The system SHALL create change requests only for findings that pass `fix.kinds` (finding kinds; all when empty) and `fix.minSeverity` (severity at or above; all when empty). Updates of outdated dependencies have no severity, so any `minSeverity` leaves them out. `deepward fix --min-severity` SHALL override `fix.minSeverity`. Open bot requests whose group consists only of findings left out SHALL be neither updated nor closed.
+
+#### Scenario: Only critical vulnerabilities
+- **WHEN** `fix.minSeverity` is `critical` and a package has a critical and a high advisory, another package a medium one, and two dependencies are outdated
+- **THEN** one change request fixes the package with the critical advisory, the plan reports four filtered findings, and open requests for the outdated dependencies stay open
+
+#### Scenario: Only updates
+- **WHEN** `fix.kinds` is `[outdated]`
+- **THEN** only updates of outdated dependencies get change requests
+
 ### Requirement: Deterministic branches without duplicates
 Branch names SHALL be derived deterministically from the ecosystem, the project and the update group (see "Configurable branch names"), for example `deepward/maven/jackson`. If an open MR/PR for that branch exists, the system SHALL update it (force-push the branch, refresh the description) instead of creating a new one.
 

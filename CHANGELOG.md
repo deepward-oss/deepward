@@ -7,6 +7,26 @@ All notable changes to Deepward are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-26
+
+### Added
+
+- `fix.minSeverity` and `fix.kinds` choose which findings get merge/pull
+  requests, for example only critical vulnerabilities; `deepward fix
+  --min-severity` overrides the severity for one run. Open requests of the
+  findings left out are kept as they are, not closed.
+- Progress logs on stderr for `deepward scan` and `deepward fix`: projects,
+  dependency graphs, analyzers and every change being verified, with
+  durations. The new `log` section sets `level`, `format` and `progress`.
+- `fix.concurrency` (default 2): change groups are verified in parallel.
+
+### Changed
+
+- `deepward fix` copies each project once per worker and reuses the copy for
+  all of its change groups, instead of copying the project for every group.
+- `--log-format` no longer defaults to `text` explicitly, so `log.format` in
+  the configuration applies when the flag is not given.
+
 ## [0.2.0] - 2026-11-26
 
 ### Changed
@@ -72,6 +92,7 @@ First public release.
   container image at `ghcr.io/deepward-oss/deepward`, SBOMs and build
   provenance attestations.
 
-[Unreleased]: https://github.com/deepward-oss/deepward/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/deepward-oss/deepward/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/deepward-oss/deepward/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/deepward-oss/deepward/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deepward-oss/deepward/releases/tag/v0.1.0

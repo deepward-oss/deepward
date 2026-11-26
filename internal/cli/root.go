@@ -80,7 +80,7 @@ func Run(ctx context.Context, env Env) int {
 	root.CompletionOptions.DisableDefaultCmd = true
 	pf := root.PersistentFlags()
 	pf.StringVar(&g.config, "config", "", "path of the configuration file (default: <root>/deepward.yaml)")
-	pf.StringVar(&g.logFormat, "log-format", "text", "log format on stderr: text or json")
+	pf.StringVar(&g.logFormat, "log-format", "", "log format on stderr: text or json (default: log.format, else text)")
 	pf.BoolVarP(&g.quiet, "quiet", "q", false, "suppress the summary on stdout")
 	pf.BoolVar(&g.noColor, "no-color", false, "disable colors (also NO_COLOR)")
 
@@ -153,13 +153,23 @@ func splitList(v string) []string {
 	return out
 }
 
-func newLogger(env Env, g *globalOpts) (*slog.Logger, error) {
+// newLogger builds the stderr logger from the log section of the
+// configuration and the global flags (which take precedence).
+func newLogger(env Env, g *globalOpts, cfg engine.LogConfig) (*slog.Logger, error) {
 	level := slog.LevelInfo
-	if g.quiet {
+	switch cfg.Level {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	if g.quiet && level < slog.LevelWarn {
 		level = slog.LevelWarn
 	}
 	opts := &slog.HandlerOptions{Level: level}
-	switch g.logFormat {
+	switch format := firstNonEmpty(g.logFormat, cfg.Format); format {
 	case "json":
 		return slog.New(slog.NewJSONHandler(env.Stderr, opts)), nil
 	case "text", "":
@@ -188,6 +198,8 @@ type runFlags struct {
 	commit       string
 	branch       string
 	target       string
+	// minSeverity is --min-severity of deepward fix.
+	minSeverity string
 }
 
 func (r *runFlags) register(cmd *cobra.Command, scan bool) {
@@ -223,9 +235,8 @@ type session struct {
 }
 
 func prepare(ctx context.Context, env Env, g *globalOpts, r *runFlags, args []string) (*session, error) {
-	logger, err := newLogger(env, g)
-	if err != nil {
-		return nil, err
+	if g.logFormat != "" && g.logFormat != "text" && g.logFormat != "json" {
+		return nil, usagef("--log-format must be text or json, got %q", g.logFormat)
 	}
 	root := env.Cwd
 	if len(args) > 0 {
@@ -246,6 +257,10 @@ func prepare(ctx context.Context, env Env, g *globalOpts, r *runFlags, args []st
 		return nil, err
 	}
 	if err := r.apply(&cfg); err != nil {
+		return nil, err
+	}
+	logger, err := newLogger(env, g, cfg.Log)
+	if err != nil {
 		return nil, err
 	}
 	ci := detectCI(env.getenv).override(r.repoURL, r.commit, r.branch, r.target)
@@ -322,6 +337,13 @@ func (r *runFlags) apply(cfg *engine.Config) error {
 			return err
 		}
 		cfg.FailOn = s
+	}
+	if r.minSeverity != "" {
+		s, err := sdk.ParseSeverity(r.minSeverity)
+		if err != nil {
+			return usagef("--min-severity: %w", err)
+		}
+		cfg.Fix.MinSeverity = s
 	}
 	if len(r.formats) > 0 {
 		cfg.Output.Formats = r.formats

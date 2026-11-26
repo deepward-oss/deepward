@@ -57,6 +57,17 @@ The system SHALL write reports only to files, write a human-readable summary to 
 - **WHEN** stdout is not a terminal
 - **THEN** the summary contains no ANSI escape sequences
 
+### Requirement: Progress logging
+The system SHALL log progress on stderr at info level unless `log.progress` is false: the number of detected projects, each fact (such as a dependency graph) and analyzer run with its status and duration, the end of the scan, and for `deepward fix` every change group and every change being verified with its result and duration. Verification scans SHALL not log scan progress of their own. The `log` section SHALL set `level` (debug, info, warn, error) and `format` (text, json); `--log-format` overrides `format` and `--quiet` raises the level to warn.
+
+#### Scenario: Long fix run
+- **WHEN** `deepward fix` verifies an ancestor upgrade that takes 40 seconds to rebuild
+- **THEN** stderr shows "verifying change" with the change before the rebuild and "change verified" or "change rejected" with the duration after it
+
+#### Scenario: Progress turned off
+- **WHEN** `log.progress` is false
+- **THEN** stderr shows no progress lines, only warnings and errors
+
 ### Requirement: Non-interactive CI operation
 The system MUST NOT prompt for input. It SHALL detect GitLab CI and GitHub Actions from their standard environment variables to fill in repository URL, commit, branch and default target branch, and SHALL accept the same values as flags for any other CI.
 
