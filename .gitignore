@@ -1,0 +1,19 @@
+/bin/
+/dist/
+/deepward-out/
+/coverage.out
+/coverage.html
+*.test
+.deepward-cache/
+
+# Build output of the sample projects (left by integration runs)
+testdata/projects/**/target/
+testdata/projects/**/project/project/
+testdata/projects/**/node_modules/
+testdata/projects/**/obj/
+testdata/projects/**/bin/
+
+# Local tool settings
+.claude/settings.local.json
+.idea/
+.vscode/

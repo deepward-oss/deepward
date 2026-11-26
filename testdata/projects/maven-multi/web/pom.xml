@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.acme</groupId>
+    <artifactId>billing-parent</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <artifactId>billing-web</artifactId>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.acme</groupId>
+      <artifactId>billing-core</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.yaml</groupId>
+      <artifactId>snakeyaml</artifactId>
+      <version>1.33</version>
+    </dependency>
+    <dependency>
+      <groupId>commons-io</groupId>
+      <artifactId>commons-io</artifactId>
+      <version>2.7</version>
+    </dependency>
+  </dependencies>
+</project>

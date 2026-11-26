@@ -1,0 +1,64 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - depguard
+    - errorlint
+    - gocritic
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (*archive/zip.ReadCloser).Close
+        - os.Remove
+        - os.RemoveAll
+    depguard:
+      rules:
+        engine-is-plugin-agnostic:
+          files:
+            - "**/internal/engine/**"
+          deny:
+            - pkg: github.com/deepward-oss/deepward/plugins
+              desc: the engine knows only pkg/sdk contracts, never concrete plugins
+        no-direct-processes:
+          files:
+            - "**/plugins/**"
+            - "**/internal/engine/**"
+            - "**/pkg/sdk/**"
+          deny:
+            - pkg: os/exec
+              desc: processes are started only through sdk.Tools (internal/toolchain)
+        sdk-is-self-contained:
+          files:
+            - "**/pkg/sdk/**"
+          deny:
+            - pkg: github.com/deepward-oss/deepward/internal
+              desc: the public SDK must not depend on internal packages
+            - pkg: github.com/deepward-oss/deepward/plugins
+              desc: the public SDK must not depend on plugins
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

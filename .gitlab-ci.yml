@@ -1,0 +1,53 @@
+stages:
+  - check
+  - integration
+
+variables:
+  GOFLAGS: -buildvcs=false
+  GOPATH: $CI_PROJECT_DIR/.go
+  CGO_ENABLED: "0"
+
+.go:
+  image: golang:1.26-bookworm
+  cache:
+    key: go-mod
+    paths:
+      - .go/pkg/mod
+
+lint:
+  stage: check
+  image: golangci/golangci-lint:v2.15.0
+  script:
+    - golangci-lint run ./...
+
+test:
+  extends: .go
+  stage: check
+  script:
+    - make cover-check
+  coverage: '/total:\s+\(statements\)\s+(\d+\.\d+)%/'
+  artifacts:
+    paths:
+      - coverage.out
+
+licenses:
+  extends: .go
+  stage: check
+  script:
+    - make licenses
+
+build:
+  extends: .go
+  stage: check
+  script:
+    - make build
+    - ./bin/deepward version
+
+# The container resolver mounts the workspace at the same path, so this job
+# needs a runner with access to the host Docker socket (not isolated dind).
+integration:
+  extends: .go
+  stage: integration
+  tags: [docker-socket]
+  script:
+    - make integration

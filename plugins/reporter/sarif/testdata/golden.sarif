@@ -1,0 +1,400 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "deepward",
+          "version": "1.0.0",
+          "informationUri": "https://github.com/deepward-oss/deepward",
+          "rules": [
+            {
+              "id": "CVE-2020-36518",
+              "shortDescription": {
+                "text": "Issue in pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1"
+              },
+              "helpUri": "https://osv.dev/vulnerability/CVE-2020-36518",
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "dependency"
+                ]
+              }
+            },
+            {
+              "id": "CVE-2021-44228",
+              "shortDescription": {
+                "text": "Issue in pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
+              },
+              "helpUri": "https://osv.dev/vulnerability/CVE-2021-44228",
+              "properties": {
+                "security-severity": "9.5",
+                "tags": [
+                  "security",
+                  "dependency"
+                ]
+              }
+            },
+            {
+              "id": "CVE-2022-1471",
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "dependency"
+                ]
+              }
+            },
+            {
+              "id": "GHSA-noff-ix00-0000",
+              "shortDescription": {
+                "text": "Issue in pkg:maven/junit/junit@4.13.1"
+              },
+              "helpUri": "https://osv.dev/vulnerability/GHSA-noff-ix00-0000",
+              "properties": {
+                "security-severity": "5.5",
+                "tags": [
+                  "security",
+                  "dependency"
+                ]
+              }
+            },
+            {
+              "id": "java.lang.security.audit.xxe",
+              "properties": {
+                "security-severity": "8.0"
+              }
+            },
+            {
+              "id": "outdated",
+              "properties": {
+                "security-severity": "0.0"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "java.lang.security.audit.xxe",
+          "level": "error",
+          "message": {
+            "text": "XML parser is vulnerable to XXE"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "core/src/main/java/Parser.java"
+                },
+                "region": {
+                  "startLine": 42,
+                  "startColumn": 5
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "deepward/v1": "70c0aefcbfd8bb3eda154734"
+          },
+          "properties": {
+            "deepward": {
+              "analyzer": "sarif-import",
+              "kind": "code-issue",
+              "severity": "high",
+              "tool": "semgrep",
+              "locationOrder": "f"
+            },
+            "security-severity": "8.0"
+          }
+        },
+        {
+          "ruleId": "CVE-2021-44228",
+          "level": "error",
+          "message": {
+            "text": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1 is affected by CVE-2021-44228"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "core/pom.xml"
+                },
+                "region": {
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "deepward/v1": "665c43c6f4941892494238c0"
+          },
+          "properties": {
+            "deepward": {
+              "analyzer": "dependency-vulnerabilities",
+              "kind": "vulnerability",
+              "severity": "critical",
+              "title": "Issue in pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+              "project": "maven:.",
+              "packages": [
+                {
+                  "purl": "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1",
+                  "paths": [
+                    [
+                      "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.5.0",
+                      "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1"
+                    ]
+                  ],
+                  "direct": true,
+                  "scope": "compile"
+                }
+              ],
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://osv.dev/vulnerability/CVE-2021-44228"
+                }
+              ],
+              "aliases": [
+                "GHSA-jfh8-c2jp-5v3q"
+              ],
+              "properties": {
+                "affected": [
+                  ">=2.0-beta9, <2.15.0"
+                ],
+                "cvss": {
+                  "score": 10,
+                  "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H",
+                  "version": "3"
+                },
+                "details": "Apache Log4j2 JNDI features <script>alert(1)</script> do not protect against attacker controlled LDAP.",
+                "fixedIn": "2.17.1",
+                "package": {
+                  "ecosystem": "Maven",
+                  "name": "org.apache.logging.log4j:log4j-core",
+                  "version": "2.14.1"
+                },
+                "published": "2021-12-10",
+                "recommendation": "upgrade org.apache.logging.log4j:log4j-core to 2.17.1",
+                "sources": [
+                  "ghsa",
+                  "osv"
+                ]
+              },
+              "locationOrder": "f+"
+            },
+            "security-severity": "9.5"
+          }
+        },
+        {
+          "ruleId": "CVE-2020-36518",
+          "level": "error",
+          "message": {
+            "text": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1 is affected by CVE-2020-36518"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "core/pom.xml"
+                },
+                "region": {
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "deepward/v1": "cec6688e9cac91d49662fc47"
+          },
+          "properties": {
+            "deepward": {
+              "analyzer": "dependency-vulnerabilities",
+              "kind": "vulnerability",
+              "severity": "high",
+              "title": "Issue in pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1",
+              "project": "maven:.",
+              "packages": [
+                {
+                  "purl": "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1",
+                  "paths": [
+                    [
+                      "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.5.0",
+                      "pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1"
+                    ]
+                  ],
+                  "direct": false,
+                  "scope": "compile"
+                }
+              ],
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://osv.dev/vulnerability/CVE-2020-36518"
+                }
+              ],
+              "properties": {
+                "ancestors": [
+                  "org.springframework.boot:spring-boot-starter-web@2.5.0"
+                ],
+                "fixedIn": "2.12.6.1",
+                "package": {
+                  "ecosystem": "Maven",
+                  "name": "com.fasterxml.jackson.core:jackson-databind",
+                  "version": "2.12.1"
+                }
+              },
+              "locationOrder": "f+"
+            },
+            "security-severity": "8.0"
+          }
+        },
+        {
+          "ruleId": "CVE-2022-1471",
+          "level": "error",
+          "message": {
+            "text": "snakeyaml 1.33 is affected by CVE-2022-1471"
+          },
+          "partialFingerprints": {
+            "deepward/v1": "6f093d8da8249b5713a2949d"
+          },
+          "suppressions": [
+            {
+              "kind": "external",
+              "justification": "SnakeYAML Constructor is not used"
+            }
+          ],
+          "properties": {
+            "deepward": {
+              "analyzer": "dependency-vulnerabilities",
+              "kind": "vulnerability",
+              "severity": "high",
+              "project": "maven:.",
+              "packages": [
+                {
+                  "purl": "pkg:maven/org.yaml/snakeyaml@1.33",
+                  "direct": true
+                }
+              ],
+              "suppression": {
+                "rule": "CVE-2022-1471",
+                "reason": "SnakeYAML Constructor is not used",
+                "expires": "2027-01-01"
+              },
+              "locationOrder": "p"
+            },
+            "security-severity": "8.0"
+          }
+        },
+        {
+          "ruleId": "GHSA-noff-ix00-0000",
+          "level": "warning",
+          "message": {
+            "text": "pkg:maven/junit/junit@4.13.1 is affected by GHSA-noff-ix00-0000"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "core/pom.xml"
+                },
+                "region": {
+                  "startLine": 14
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "deepward/v1": "1993dba5b63df49f0e4e8ac3"
+          },
+          "properties": {
+            "deepward": {
+              "analyzer": "dependency-vulnerabilities",
+              "kind": "vulnerability",
+              "severity": "medium",
+              "title": "Issue in pkg:maven/junit/junit@4.13.1",
+              "project": "maven:.",
+              "packages": [
+                {
+                  "purl": "pkg:maven/junit/junit@4.13.1",
+                  "paths": [
+                    [
+                      "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.5.0",
+                      "pkg:maven/junit/junit@4.13.1"
+                    ]
+                  ],
+                  "direct": true,
+                  "scope": "compile"
+                }
+              ],
+              "references": [
+                {
+                  "type": "ADVISORY",
+                  "url": "https://osv.dev/vulnerability/GHSA-noff-ix00-0000"
+                }
+              ],
+              "properties": {
+                "noFixAvailable": true
+              },
+              "locationOrder": "f+"
+            },
+            "security-severity": "5.5"
+          }
+        },
+        {
+          "ruleId": "outdated",
+          "level": "none",
+          "message": {
+            "text": "org.yaml:snakeyaml 1.33 → 2.3 available"
+          },
+          "partialFingerprints": {
+            "deepward/v1": "2679ce1d9249d03d89b3de9e"
+          },
+          "properties": {
+            "deepward": {
+              "analyzer": "outdated-dependencies",
+              "kind": "outdated",
+              "severity": "none",
+              "project": "maven:.",
+              "packages": [
+                {
+                  "purl": "pkg:maven/org.yaml/snakeyaml@1.33",
+                  "direct": true
+                }
+              ],
+              "properties": {
+                "current": "1.33",
+                "latest": "2.3",
+                "major": "2.3",
+                "minor": "",
+                "package": {
+                  "name": "org.yaml:snakeyaml"
+                },
+                "updateType": "major"
+              },
+              "locationOrder": "p"
+            },
+            "security-severity": "0.0"
+          }
+        }
+      ],
+      "properties": {
+        "commit": "0a1b2c3",
+        "dataSources": [
+          {
+            "attribution": "GitHub Advisory Database",
+            "license": "CC-BY-4.0",
+            "name": "ghsa"
+          },
+          {
+            "attribution": "OSV.dev and its upstream databases",
+            "license": "CC-BY-4.0",
+            "name": "osv"
+          }
+        ]
+      }
+    }
+  ]
+}

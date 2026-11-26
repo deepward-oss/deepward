@@ -1,0 +1,40 @@
+schema: spec-driven
+
+context: |
+  Write all artifacts, code, comments and docs in English.
+  Deepward is a universal checks orchestrator. Dependency analysis is the built-in plugin set.
+  Other checks (static analysis, linters, secrets) are integrated as external tools via config,
+  never as analyzer-specific code. pkg/sdk and internal/engine must stay check-agnostic.
+  The project is licensed under MIT. Every dependency compiled into the binary must be
+  MIT-compatible (MIT, BSD-2/3, Apache-2.0, ISC, MPL-2.0 if unmodified); no GPL/AGPL code.
+
+# Project context (optional)
+# Add only constraints that should guide OpenSpec artifacts and workflows.
+# Include constraints an agent cannot infer by reading the code.
+# Keep general project documentation and discoverable codebase facts out.
+# Example:
+#   context: |
+#     Designs and tasks must cover Windows, macOS, and Linux
+#     Write all artifacts in Spanish
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always state what is out of scope
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

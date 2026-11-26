@@ -1,0 +1,8 @@
+.git
+bin
+dist
+deepward-out
+coverage.out
+.claude
+.cursor
+.agents

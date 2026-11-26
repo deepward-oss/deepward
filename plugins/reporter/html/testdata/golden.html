@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="Deepward 1.0.0">
+<title>Deepward report: https://git.acme.local/team/billing</title>
+<style>:root {
+  --bg: #f7f8fa; --panel: #ffffff; --text: #1d2330; --muted: #677085; --border: #dde1e8; --accent: #3355cc;
+  --critical: #7a1f9e; --high: #c62828; --medium: #b26a00; --low: #1f6fb2; --unknown: #5b6474; --ok: #2e7d32;
+  --code: #eef1f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151c; --panel: #1a1f29; --text: #e5e8ef; --muted: #98a1b3; --border: #2c3341; --accent: #7d9bff;
+    --critical: #c792ea; --high: #ff6b6b; --medium: #f2b45c; --low: #6cb6ff; --unknown: #9aa3b5; --ok: #66bb6a; --code: #232a37;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header.top { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; padding: 16px 24px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.brand { font-size: 20px; font-weight: 700; letter-spacing: .2px; }
+.meta { display: flex; flex-wrap: wrap; gap: 20px; margin: 0; }
+.meta div { display: flex; flex-direction: column; }
+.meta dt { font-size: 11px; text-transform: uppercase; color: var(--muted); }
+.meta dd { margin: 0; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px 24px 48px; }
+section { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin-top: 16px; }
+h2 { margin: 0 0 12px; font-size: 17px; }
+h3 { font-size: 14px; margin: 16px 0 8px; }
+.count { display: inline-block; min-width: 24px; padding: 0 8px; border-radius: 10px; background: var(--code); font-size: 12px; text-align: center; }
+.cards { display: flex; flex-wrap: wrap; gap: 12px; }
+.card { flex: 1 1 110px; border-radius: 8px; padding: 10px 14px; border: 1px solid var(--border); border-left: 4px solid var(--unknown); }
+.card .num { font-size: 26px; font-weight: 700; }
+.card .label { color: var(--muted); text-transform: capitalize; }
+.card.sev-critical { border-left-color: var(--critical); } .card.sev-high { border-left-color: var(--high); }
+.card.sev-medium { border-left-color: var(--medium); } .card.sev-low { border-left-color: var(--low); }
+.card.neutral { border-left-color: var(--border); }
+.card.notbuilt { border-left-color: var(--muted); border-style: dashed; border-left-style: solid; }
+.facts p { margin: 8px 0 0; }
+.gate.failed strong { color: var(--high); } .gate.passed strong { color: var(--ok); }
+.filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+.filters label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); }
+.filters .grow { flex: 1 1 220px; }
+.filters select, .filters input { margin-top: 4px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+th[data-sort] { cursor: pointer; user-select: none; }
+th[data-sort]::after { content: " ↕"; opacity: .35; }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; word-break: break-word; }
+pre { background: var(--code); padding: 10px; border-radius: 6px; overflow: auto; max-height: 360px; white-space: pre-wrap; font: 12px ui-monospace, Menlo, Consolas, monospace; }
+.badge { display: inline-block; padding: 1px 8px; border-radius: 10px; color: #fff; font-size: 12px; font-weight: 600; text-transform: capitalize; background: var(--unknown); }
+.badge.sev-critical { background: var(--critical); } .badge.sev-high { background: var(--high); }
+.badge.sev-medium { background: var(--medium); } .badge.sev-low { background: var(--low); }
+.badge.sev-none { background: var(--border); color: var(--text); }
+.badge.notbuilt { background: transparent; color: var(--muted); border: 1px dashed var(--muted); text-transform: none; font-weight: 500; }
+section.notbuilt { border-style: dashed; }
+section.notbuilt .explain { max-width: 75ch; }
+section.notbuilt tbody.item { opacity: .8; }
+.muted { color: var(--muted); } .small { font-size: 12px; } .ver { color: var(--muted); }
+.toggle { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
+tr.detail td { background: var(--bg); }
+tbody.item.collapsed tr.detail { display: none; }
+tbody.item.hidden { display: none; }
+.kv { display: grid; grid-template-columns: 160px 1fr; gap: 6px 16px; margin: 0; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; }
+.kv ul { margin: 0; padding-left: 18px; }
+.title { font-weight: 600; margin: 0 0 8px; }
+.empty { color: var(--muted); font-style: italic; }
+.status-failed td:nth-child(2) { color: var(--high); font-weight: 600; }
+.status-skipped td:nth-child(2) { color: var(--medium); font-weight: 600; }
+.problems { margin: 0; padding-left: 18px; }
+footer { max-width: 1280px; margin: 0 auto; padding: 0 24px 32px; color: var(--muted); }
+a { color: var(--accent); }
+@media (max-width: 720px) { .kv { grid-template-columns: 1fr; } th, td { padding: 6px; } }
+@media print { .filters, .toggle::after { display: none; } tbody.item.collapsed tr.detail { display: table-row; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">Deepward <span class="muted">report</span></div>
+  <dl class="meta">
+    <div><dt>Repository</dt><dd>https://git.acme.local/team/billing</dd></div>
+    <div><dt>Branch</dt><dd>main</dd></div>
+    <div><dt>Commit</dt><dd><code>0a1b2c3</code></dd></div>
+    <div><dt>Generated</dt><dd>2026-11-26 09:30 UTC</dd></div>
+    <div><dt>Tool</dt><dd>Deepward 1.0.0</dd></div>
+    
+  </dl>
+</header>
+
+<main>
+<section class="summary" aria-label="Summary">
+  <div class="cards">
+    <div class="card sev-critical" data-summary="critical"><div class="num">1</div><div class="label">critical</div></div><div class="card sev-high" data-summary="high"><div class="num">2</div><div class="label">high</div></div><div class="card sev-medium" data-summary="medium"><div class="num">1</div><div class="label">medium</div></div><div class="card sev-low" data-summary="low"><div class="num">0</div><div class="label">low</div></div><div class="card sev-unknown" data-summary="unknown"><div class="num">0</div><div class="label">unknown</div></div>
+    
+    <div class="card neutral"><div class="num">1</div><div class="label">suppressed</div></div>
+  </div>
+  <div class="facts">
+    <p><strong>3</strong> project(s):
+      1 ok, 1 skipped, 1 failed.
+      Dependencies with findings: <strong>3</strong> direct, <strong>1</strong> transitive.</p>
+    <p>By analyzer: <code>dependency-vulnerabilities</code> 3, <code>outdated-dependencies</code> 1, <code>sarif-import</code> 1.</p>
+    
+    <p class="gate failed">Quality gate (<code>high</code>):
+      <strong>failed</strong>, 3 active finding(s) at or above the threshold.</p>
+    
+  </div>
+</section>
+
+<section class="filters" aria-label="Filters" hidden>
+  <label>Project <select id="f-project"><option value="">all</option><option value="maven:.">maven:.</option><option value="nuget:client">nuget:client</option><option value="sbt:backend">sbt:backend</option></select></label>
+  <label>Ecosystem <select id="f-ecosystem"><option value="">all</option><option value="maven">maven</option><option value="nuget">nuget</option><option value="sbt">sbt</option></select></label>
+  <label>Severity <select id="f-severity"><option value="">all</option><option>critical</option><option>high</option><option>medium</option><option>low</option><option>unknown</option></select></label>
+  <label>Dependency <select id="f-direct"><option value="">all</option><option value="direct">direct</option><option value="transitive">transitive</option></select></label>
+  
+  <label class="grow">Search <input id="f-search" type="search" placeholder="package or advisory ID"></label>
+</section>
+
+<section id="vulnerabilities">
+  <h2>Vulnerabilities <span class="count" data-count-for="vulns">3</span></h2>
+  
+  <p class="muted">1 critical · 1 high · 1 medium · 0 low · 0 unknown</p>
+  <table class="findings" id="vulns">
+    <thead><tr>
+      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Advisory</th><th data-sort="text">Package</th>
+      <th data-sort="text">Project</th><th data-sort="text">Dependency</th><th data-sort="text">Fixed in</th>
+    </tr></thead>
+    
+    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="critical" data-direct="direct" data-built="built" data-search="cve-2021-44228 org.apache.logging.log4j:log4j-core 2.14.1 issue in pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1 ghsa-jfh8-c2jp-5v3q" data-rank="5">
+      <tr class="main">
+        <td><span class="badge sev-critical">critical</span> <span class="muted">10</span></td>
+        <td><button type="button" class="toggle" aria-expanded="true">CVE-2021-44228</button><div class="muted small">GHSA-jfh8-c2jp-5v3q</div></td>
+        <td><code>org.apache.logging.log4j:log4j-core</code> <span class="ver">2.14.1</span></td>
+        <td>maven:.</td>
+        <td>direct <span class="muted">(compile)</span></td>
+        <td><code>2.17.1</code></td>
+      </tr>
+      <tr class="detail"><td colspan="6">
+        <p class="title">Issue in pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1</p>
+        <dl class="kv">
+          <dt>CVSS</dt><dd><code>CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H</code></dd>
+          <dt>Affected</dt><dd><code>&gt;=2.0-beta9, &lt;2.15.0</code> </dd>
+          <dt>Fixed in</dt><dd><code>2.17.1</code></dd>
+          <dt>Dependency path</dt><dd><ul class="paths"><li>org.springframework.boot:spring-boot-starter-web@2.5.0 → org.apache.logging.log4j:log4j-core@2.14.1</li></ul></dd>
+          <dt>Recommended action</dt><dd>upgrade org.apache.logging.log4j:log4j-core to 2.17.1</dd>
+          <dt>Declared in</dt><dd><code>core/pom.xml:14</code></dd>
+          <dt>Sources</dt><dd>ghsa, osv</dd>
+          <dt>Published</dt><dd>2021-12-10</dd>
+          <dt>References</dt><dd><ul class="refs"><li><a href="https://osv.dev/vulnerability/CVE-2021-44228" rel="noopener noreferrer">https://osv.dev/vulnerability/CVE-2021-44228</a></li></ul></dd>
+        </dl>
+        <details class="desc"><summary>Description</summary><pre>Apache Log4j2 JNDI features &lt;script&gt;alert(1)&lt;/script&gt; do not protect against attacker controlled LDAP.</pre></details>
+      </td></tr>
+    </tbody>
+
+    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="high" data-direct="transitive" data-built="built" data-search="cve-2020-36518 com.fasterxml.jackson.core:jackson-databind 2.12.1 issue in pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1" data-rank="4">
+      <tr class="main">
+        <td><span class="badge sev-high">high</span></td>
+        <td><button type="button" class="toggle" aria-expanded="true">CVE-2020-36518</button></td>
+        <td><code>com.fasterxml.jackson.core:jackson-databind</code> <span class="ver">2.12.1</span></td>
+        <td>maven:.</td>
+        <td>transitive <span class="muted">(compile)</span></td>
+        <td><code>2.12.6.1</code></td>
+      </tr>
+      <tr class="detail"><td colspan="6">
+        <p class="title">Issue in pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1</p>
+        <dl class="kv">
+          
+          
+          <dt>Fixed in</dt><dd><code>2.12.6.1</code></dd>
+          <dt>Dependency path</dt><dd><ul class="paths"><li>org.springframework.boot:spring-boot-starter-web@2.5.0 → com.fasterxml.jackson.core:jackson-databind@2.12.1</li></ul></dd>
+          
+          <dt>Declared in</dt><dd><code>core/pom.xml:14</code></dd>
+          
+          
+          <dt>References</dt><dd><ul class="refs"><li><a href="https://osv.dev/vulnerability/CVE-2020-36518" rel="noopener noreferrer">https://osv.dev/vulnerability/CVE-2020-36518</a></li></ul></dd>
+        </dl>
+        
+      </td></tr>
+    </tbody>
+
+    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="medium" data-direct="direct" data-built="built" data-search="ghsa-noff-ix00-0000 junit:junit@4.13.1  issue in pkg:maven/junit/junit@4.13.1" data-rank="3">
+      <tr class="main">
+        <td><span class="badge sev-medium">medium</span></td>
+        <td><button type="button" class="toggle" aria-expanded="true">GHSA-noff-ix00-0000</button></td>
+        <td><code>junit:junit@4.13.1</code> <span class="ver"></span></td>
+        <td>maven:.</td>
+        <td>direct <span class="muted">(compile)</span></td>
+        <td><span class="muted">no fix</span></td>
+      </tr>
+      <tr class="detail"><td colspan="6">
+        <p class="title">Issue in pkg:maven/junit/junit@4.13.1</p>
+        <dl class="kv">
+          
+          
+          
+          <dt>Dependency path</dt><dd><ul class="paths"><li>org.springframework.boot:spring-boot-starter-web@2.5.0 → junit:junit@4.13.1</li></ul></dd>
+          
+          <dt>Declared in</dt><dd><code>core/pom.xml:14</code></dd>
+          
+          
+          <dt>References</dt><dd><ul class="refs"><li><a href="https://osv.dev/vulnerability/GHSA-noff-ix00-0000" rel="noopener noreferrer">https://osv.dev/vulnerability/GHSA-noff-ix00-0000</a></li></ul></dd>
+        </dl>
+        
+      </td></tr>
+    </tbody>
+
+  </table>
+  
+</section>
+
+
+
+
+<section id="outdated">
+  <h2>Outdated dependencies <span class="count" data-count-for="outdated-table">1</span></h2>
+  <table class="findings" id="outdated-table">
+    <thead><tr><th data-sort="text">Package</th><th data-sort="text">Current</th><th data-sort="text">Patch</th><th data-sort="text">Minor</th><th data-sort="text">Major</th><th data-sort="text">Project</th></tr></thead>
+    
+    <tbody class="item" data-project="maven:." data-ecosystem="maven" data-severity="none" data-direct="direct" data-search="org.yaml:snakeyaml 1.33 2.3">
+      <tr class="main"><td><code>org.yaml:snakeyaml</code></td><td>1.33</td><td></td><td></td><td>2.3</td><td>maven:.</td></tr>
+    </tbody>
+    
+  </table>
+</section>
+
+
+
+<section class="generic">
+  <h2>Code issue findings <span class="count" data-count-for="kind-code-issue">1</span></h2>
+  <table class="findings" id="kind-code-issue">
+    <thead><tr><th data-sort="rank">Severity</th><th data-sort="text">Rule</th><th data-sort="text">Message</th><th data-sort="text">Location</th><th data-sort="text">Source</th></tr></thead>
+    
+    <tbody class="item" data-project="" data-ecosystem="" data-severity="high" data-direct="" data-search="java.lang.security.audit.xxe xml parser is vulnerable to xxe core/src/main/java/parser.java:42 semgrep" data-rank="4">
+      <tr class="main"><td><span class="badge sev-high">high</span></td><td><code>java.lang.security.audit.xxe</code></td><td>XML parser is vulnerable to XXE</td>
+        <td><code>core/src/main/java/Parser.java:42</code></td><td>sarif-import <span class="muted">(semgrep)</span></td></tr>
+    </tbody>
+    
+  </table>
+</section>
+
+
+<section id="projects">
+  <h2>Projects</h2>
+  <table class="plain">
+    <thead><tr><th>Project</th><th>Status</th><th>Findings</th><th>Details</th></tr></thead>
+    <tbody>
+    
+      <tr class="status-ok"><td><code>maven:.</code></td><td>ok</td><td>4</td>
+        <td></td></tr>
+    
+      <tr class="status-failed"><td><code>nuget:client</code></td><td>failed</td><td>0</td>
+        <td>dotnet restore failed<details><summary>Tool output (last 1 lines)</summary><pre>error NU1101: Unable to find package Acme.Internal
+</pre></details></td></tr>
+    
+      <tr class="status-skipped"><td><code>sbt:backend</code></td><td>skipped</td><td>0</td>
+        <td>tool-not-found: sbt (tried: config-path, wrapper, path)</td></tr>
+    
+    </tbody>
+  </table>
+  
+  <h3>Failed plugin runs</h3>
+  <ul class="problems"><li><code>license-check</code> on <code>maven:.</code>: plugin panicked: boom</li></ul>
+  
+  
+  <h3>Warnings</h3>
+  <ul class="problems"><li><span class="muted">project-skipped</span> tool-not-found: sbt</li></ul>
+  
+</section>
+
+<section id="suppressed">
+  <h2>Suppressed <span class="count">1</span></h2>
+  
+  <table class="plain">
+    <thead><tr><th>Rule</th><th>Package</th><th>Project</th><th>Reason</th><th>Expires</th></tr></thead>
+    <tbody><tr><td><code>CVE-2022-1471</code></td><td>org.yaml:snakeyaml@1.33</td><td>maven:.</td><td>SnakeYAML Constructor is not used</td><td>2027-01-01</td></tr></tbody>
+  </table>
+  
+</section>
+</main>
+
+<footer>
+  
+  <p>Vulnerability data: <strong>ghsa</strong> (CC-BY-4.0, GitHub Advisory Database); <strong>osv</strong> (CC-BY-4.0, OSV.dev and its upstream databases).</p>
+  
+  <p class="muted">Generated by Deepward 1.0.0 · schema v1</p>
+</footer>
+<script>(function () {
+  "use strict";
+  var filters = document.querySelector(".filters");
+  if (filters) { filters.hidden = false; }
+  var items = Array.prototype.slice.call(document.querySelectorAll("tbody.item"));
+
+  // Collapse details by default; without JavaScript they stay visible.
+  items.forEach(function (item) {
+    var toggle = item.querySelector(".toggle");
+    if (!toggle) { return; }
+    item.classList.add("collapsed");
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", function () {
+      var collapsed = item.classList.toggle("collapsed");
+      toggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    });
+  });
+
+  function value(id) {
+    var el = document.getElementById(id);
+    return el ? el.value.trim().toLowerCase() : "";
+  }
+
+  function apply() {
+    var project = value("f-project"), eco = value("f-ecosystem"), sev = value("f-severity"),
+        direct = value("f-direct"), built = value("f-built"), q = value("f-search");
+    items.forEach(function (item) {
+      var d = item.dataset;
+      var show = (!project || d.project.toLowerCase() === project) &&
+        (!eco || d.ecosystem === eco) &&
+        (!sev || d.severity === sev) &&
+        (!direct || d.direct === direct) &&
+        (!built || (d.built || "built") === built) &&
+        (!q || d.search.indexOf(q) >= 0);
+      item.classList.toggle("hidden", !show);
+    });
+    document.querySelectorAll("[data-count-for]").forEach(function (badge) {
+      var table = document.getElementById(badge.getAttribute("data-count-for"));
+      if (table) { badge.textContent = table.querySelectorAll("tbody.item:not(.hidden)").length; }
+    });
+    // Severity cards count built findings; not-built ones have their own card.
+    var counts = {}, notBuilt = 0;
+    items.forEach(function (item) {
+      if (item.classList.contains("hidden")) { return; }
+      if (item.dataset.built === "not-built") { notBuilt++; return; }
+      counts[item.dataset.severity] = (counts[item.dataset.severity] || 0) + 1;
+    });
+    var nb = document.querySelector("[data-summary-notbuilt] .num");
+    if (nb) { nb.textContent = notBuilt; }
+    document.querySelectorAll("[data-summary]").forEach(function (card) {
+      card.querySelector(".num").textContent = counts[card.getAttribute("data-summary")] || 0;
+    });
+  }
+
+  ["f-project", "f-ecosystem", "f-severity", "f-direct", "f-built", "f-search"].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) { el.addEventListener(el.tagName === "INPUT" ? "input" : "change", apply); }
+  });
+
+  document.querySelectorAll("table.findings th[data-sort]").forEach(function (th, col) {
+    th.addEventListener("click", function () {
+      var table = th.closest("table");
+      var desc = th.getAttribute("aria-sort") !== "descending";
+      table.querySelectorAll("th").forEach(function (h) { h.removeAttribute("aria-sort"); });
+      th.setAttribute("aria-sort", desc ? "descending" : "ascending");
+      var rows = Array.prototype.slice.call(table.querySelectorAll("tbody.item"));
+      var key = function (item) {
+        if (th.getAttribute("data-sort") === "rank") { return Number(item.dataset.rank || 0); }
+        var cell = item.querySelector("tr.main").children[Array.prototype.indexOf.call(th.parentNode.children, th)];
+        return cell ? cell.textContent.trim().toLowerCase() : "";
+      };
+      rows.sort(function (a, b) {
+        var x = key(a), y = key(b);
+        var c = x < y ? -1 : x > y ? 1 : 0;
+        return desc ? -c : c;
+      });
+      rows.forEach(function (r) { table.appendChild(r); });
+    });
+  });
+})();
+</script>
+</body>
+</html>
+
+

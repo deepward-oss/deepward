@@ -1,0 +1,365 @@
+{
+  "$id": "https://raw.githubusercontent.com/deepward-oss/deepward/main/schema/deepward.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allowPartial": {
+      "type": "boolean"
+    },
+    "cache": {
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "ttl": {
+          "examples": [
+            "30s",
+            "5m",
+            "1h"
+          ],
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "concurrency": {
+      "type": "integer"
+    },
+    "ecosystems": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "addons": {
+            "additionalProperties": {
+              "additionalProperties": false,
+              "properties": {
+                "coordinates": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                },
+                "goal": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "setup": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "dir": {
+                  "type": "string"
+                },
+                "env": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "tool": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "exclude": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "failOn": {
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "unknown",
+        "none"
+      ],
+      "type": "string"
+    },
+    "fix": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "grouping": {
+          "enum": [
+            "package",
+            "type",
+            "project"
+          ],
+          "type": "string"
+        },
+        "groups": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "match": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "maxCandidates": {
+          "type": "integer"
+        },
+        "securityLabels": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "targetBranch": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ignore": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "analyzer": {
+            "type": "string"
+          },
+          "expires": {
+            "format": "date",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "purl": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "integrations": {
+      "additionalProperties": {
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "offline": {
+      "type": "boolean"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "type": "string"
+        },
+        "formats": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "platform": {
+      "additionalProperties": false,
+      "properties": {
+        "apiUrl": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "pluginTimeout": {
+      "examples": [
+        "30s",
+        "5m",
+        "1h"
+      ],
+      "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+      "type": "string"
+    },
+    "plugins": {
+      "additionalProperties": {
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "projects": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "setup": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "dir": {
+                  "type": "string"
+                },
+                "env": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                "tool": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    },
+    "tools": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "containerUser": {
+            "type": "string"
+          },
+          "download": {
+            "additionalProperties": false,
+            "properties": {
+              "binary": {
+                "type": "string"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "executables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "image": {
+            "type": "string"
+          },
+          "javaHome": {
+            "type": "string"
+          },
+          "jvmOpts": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "resolvers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "timeout": {
+            "examples": [
+              "30s",
+              "5m",
+              "1h"
+            ],
+            "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$",
+            "type": "string"
+          },
+          "versionArgs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "versionPattern": {
+            "type": "string"
+          },
+          "workdir": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "type": "object"
+    }
+  },
+  "title": "deepward.yaml",
+  "type": "object"
+}

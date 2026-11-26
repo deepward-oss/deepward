@@ -1,0 +1,9 @@
+# Release image, built by GoReleaser (.goreleaser.yaml, dockers_v2) from the
+# binaries it already built. Build tools (mvn, sbt, dotnet, go) are not
+# included; copy /deepward into an image that has them:
+#   COPY --from=ghcr.io/deepward-oss/deepward:0.1 /deepward /usr/local/bin/deepward
+# distroless/static has CA certificates and the nonroot user (65532).
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/deepward /deepward
+ENTRYPOINT ["/deepward"]
