@@ -19,7 +19,7 @@ findings are gone and the dependency graph still resolves.
 <a href="docs/data-licenses.md"><img src="https://img.shields.io/badge/data-OSV.dev-2DD4BF" alt="Vulnerability data: OSV.dev"></a>
 </p>
 
-<!-- docs/assets/demo.gif goes here once rendered with `make demo-gif`. -->
+<p align="center"><img src="docs/assets/demo.gif" alt="deepward scan finds 28 vulnerabilities in an npm project and fails the gate; deepward fix prepares 3 verified change requests" width="800"></p>
 
 ## Quickstart
 

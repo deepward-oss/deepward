@@ -15,7 +15,7 @@ Set TypingSpeed 45ms
 Set WindowBar Colorful
 
 Hide
-Type "export PATH=$PWD/bin:$PATH PS1='$ ' && demo=$(mktemp -d) && cp -r testdata/projects/npm-app/. $demo && cd $demo && clear"
+Type "export PATH=$PWD/bin:$PATH PS1='$ ' && demo=$(mktemp -d) && cp -r testdata/projects/npm-app/. $demo && cd $demo && printf 'log:\n  progress: false\nfix:\n  kinds: [vulnerability]\n' > deepward.yaml && clear"
 Enter
 Sleep 500ms
 Show
@@ -25,9 +25,9 @@ Sleep 600ms
 Enter
 Sleep 9s
 
-Type "deepward fix | tail -n 16"
+Type "deepward fix | tail -n 13"
 Sleep 600ms
 Enter
-Sleep 20s
+Sleep 14s
 
 Sleep 4s

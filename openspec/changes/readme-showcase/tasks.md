@@ -15,7 +15,7 @@
 
 ## 3. Visual assets
 
-- [ ] 3.1 Write `docs/assets/demo.tape` (vhs) that copies `testdata/projects/npm-app` to a temporary directory and runs `deepward scan --fail-on high` and `deepward fix` without `--publish`, and add a `make demo-gif` target that renders it; verify `make demo-gif` produces `docs/assets/demo.gif` of about 15 to 25 seconds and under about 2 MB, readable at 800 px width
+- [x] 3.1 Write `docs/assets/demo.tape` (vhs) that copies `testdata/projects/npm-app` to a temporary directory and runs `deepward scan --fail-on high` and `deepward fix` without `--publish`, and add a `make demo-gif` target that renders it; verify `make demo-gif` produces `docs/assets/demo.gif` of about 15 to 25 seconds and under about 2 MB, readable at 800 px width
 - [x] 3.2 Capture `docs/assets/report.png` from the demo repository's HTML report artifact at a fixed viewport, cropped to the summary and first findings, and optimize it; verify the image is legible at README width and matches the current report layout
 - [x] 3.3 Capture `docs/assets/pull-request.png` from one demo security pull request (title, description with verification details, diff summary) in the light theme and optimize it; verify it shows the same pull request recorded in 1.3
 - [x] 3.4 Mention `make demo-gif` and the vhs prerequisite in the Development section of the README draft, and verify the command listed there matches the Makefile target
@@ -28,7 +28,7 @@
 ## 5. README rewrite
 
 - [ ] 5.1 Rewrite the hero: banner with alt text set to the tagline, tagline "Dependency fixes, verified before they reach your review.", two-sentence subtitle that defines "verified" as the targeted findings gone and the graph still resolving, and badges (release, `ci` workflow, self-check workflow, MIT, OSV.dev); verify the badges render on GitHub, the self-check badge links to the workflow from 2.2, and the hero, GIF and quickstart fit the first screen at a common laptop size
-- [ ] 5.2 Add the demo GIF and the three-line quickstart (`docker run` scan for a lockfile project, `deepward fix`, `deepward fix --publish`) with a "see it live" link to the demo repository; verify each command runs as written against `testdata/projects/npm-app`
+- [x] 5.2 Add the demo GIF and the three-line quickstart (`docker run` scan for a lockfile project, `deepward fix`, `deepward fix --publish`) with a "see it live" link to the demo repository; verify each command runs as written against `testdata/projects/npm-app`
 - [x] 5.3 Add the "Why Deepward" section with four pain-to-answer items about fixes and the short orchestrator paragraph after it; verify every statement maps to behavior described in `docs/publishing.md` or `docs/configuration.md` and links there
 - [x] 5.4 Add the comparison table from 4.2; verify it renders correctly on GitHub and its links resolve
 - [x] 5.5 Add "Works with" (ecosystems, CI platforms, a minimal GitHub Actions snippet that includes installing Deepward, link to `docs/publishing.md` for GitLab and the full setup) and "What you get" (report and pull request screenshots linked to the live workflow run and pull request); verify the snippet is valid workflow YAML and every image path exists
