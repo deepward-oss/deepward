@@ -1,0 +1,9 @@
+# Deepward checks its own dependencies with this file
+# (.github/workflows/deepward.yml). Only the root Go module is scanned: the
+# fixtures under testdata/ carry intentionally vulnerable versions and must
+# never be "fixed".
+exclude:
+  - testdata/
+  - plugins/*/*/testdata
+  - test/
+  - examples/

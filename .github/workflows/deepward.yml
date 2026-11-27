@@ -1,0 +1,76 @@
+# Deepward checks its own dependencies with the latest released binary.
+# Scope: deepward.yaml (the root Go module only, test fixtures excluded).
+name: deepward
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEEPWARD_VERSION: "0.4.0"
+
+jobs:
+  scan:
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install Deepward
+        run: |
+          base="https://github.com/deepward-oss/deepward/releases/download/v${DEEPWARD_VERSION}"
+          archive="deepward_${DEEPWARD_VERSION}_linux_amd64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$archive"
+          curl -fsSLO "$base/checksums.txt"
+          sha256sum --check --ignore-missing checksums.txt
+          tar -xzf "$archive" deepward
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: deepward scan --format html,json,sarif --fail-on high
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deepward-report
+          path: deepward-out/
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: deepward-out/deepward-report.sarif
+
+  fix:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install Deepward
+        run: |
+          base="https://github.com/deepward-oss/deepward/releases/download/v${DEEPWARD_VERSION}"
+          archive="deepward_${DEEPWARD_VERSION}_linux_amd64.tar.gz"
+          cd "$RUNNER_TEMP"
+          curl -fsSLO "$base/$archive"
+          curl -fsSLO "$base/checksums.txt"
+          sha256sum --check --ignore-missing checksums.txt
+          tar -xzf "$archive" deepward
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: deepward fix --publish --target-branch develop
+        env:
+          DEEPWARD_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
