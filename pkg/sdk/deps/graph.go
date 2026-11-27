@@ -35,19 +35,43 @@ const (
 	ScopeNotBuilt = "not-built"
 )
 
-// Node is a resolved package. ID is the full purl (with version).
+// Node is a resolved package or a module of a multi-module build. A
+// package's ID is its full purl (with version); a module's ID starts with
+// "module:" (see ModuleID).
 type Node struct {
 	ID        string    `json:"id"`
 	Ecosystem Ecosystem `json:"ecosystem"`
-	// Name is the package coordinates (group:artifact or NuGet ID).
+	// Name is the package coordinates (group:artifact or NuGet ID), or the
+	// module's display name (artifactId, subproject ID, project file name).
 	Name    string `json:"name"`
 	Version string `json:"version"`
 	Scope   string `json:"scope,omitempty"`
 	Direct  bool   `json:"direct"`
+	// Kind is "" for packages and KindModule for modules.
+	Kind string `json:"kind,omitempty"`
+	// Modules maps the ID of every module that reaches a package to the
+	// package's scope in that module. It is set only in graphs with modules.
+	Modules map[string]string `json:"modules,omitempty"`
 	// Attributes carries extra details: scalaBase, scalaSuffix, module,
-	// targetFramework, ...
+	// targetFramework, manifest (of a module), ...
 	Attributes map[string]string `json:"attributes,omitempty"`
 }
+
+// KindModule marks module nodes: members of a multi-module build (a Maven
+// module, an sbt subproject, a .NET project of a solution). The project
+// root points at its modules, and modules point at the packages they
+// declare and at the modules they depend on.
+const KindModule = "module"
+
+// modulePrefix starts the ID of every module node.
+const modulePrefix = "module:"
+
+// ModuleID returns the node ID of a module from a key that is unique in the
+// project, such as the path of its manifest or its subproject ID.
+func ModuleID(key string) string { return modulePrefix + key }
+
+// IsModule reports whether the node is a module.
+func (n Node) IsModule() bool { return n.Kind == KindModule }
 
 // PURL parses the node ID.
 func (n Node) PURL() purl.PURL { return purl.MustParse(n.ID) }
@@ -59,7 +83,9 @@ type Edge struct {
 }
 
 // Graph is a project's resolved dependency graph. Root is a synthetic node
-// for the project itself; direct dependencies are its children.
+// for the project itself. Without modules, direct dependencies are its
+// children; with modules, the root's children are the modules and a
+// package is direct when a module declares it.
 type Graph struct {
 	Root  string `json:"root"`
 	Nodes []Node `json:"nodes"`
@@ -84,7 +110,15 @@ func NewGraph(root, source string, nodes []Node, edges []Edge) (*Graph, error) {
 			continue
 		}
 		seen[n.ID] = true
-		if n.ID != root {
+		switch {
+		case n.ID == root:
+		case n.IsModule():
+			if !strings.HasPrefix(n.ID, modulePrefix) {
+				return nil, fmt.Errorf("module node %q: the ID must start with %q", n.ID, modulePrefix)
+			}
+		case strings.HasPrefix(n.ID, modulePrefix):
+			return nil, fmt.Errorf("node %q: only module nodes may use the %q prefix", n.ID, modulePrefix)
+		default:
 			p, err := purl.Parse(n.ID)
 			if err != nil {
 				return nil, fmt.Errorf("node %q: %w", n.ID, err)
@@ -133,13 +167,63 @@ func NewGraph(root, source string, nodes []Node, edges []Edge) (*Graph, error) {
 			continue
 		}
 		g.Nodes[i].Direct = false
+		if g.Nodes[i].IsModule() {
+			continue
+		}
 		for _, p := range g.parents[g.Nodes[i].ID] {
-			if p == root {
+			if g.declares(p) {
 				g.Nodes[i].Direct = true
 			}
 		}
 	}
+	g.fillModules()
 	return g, nil
+}
+
+// declares reports whether a parent makes its children direct: the root or
+// a module.
+func (g *Graph) declares(id string) bool {
+	if id == g.Root {
+		return true
+	}
+	i, ok := g.index[id]
+	return ok && g.Nodes[i].IsModule()
+}
+
+// fillModules records, for every package, the modules that reach it
+// through packages. The walk does not cross other modules: what a module
+// gets through a module it depends on (Maven inlined subtrees, sbt update
+// reports, NuGet assets) is in the per-module data the plugin sets, which
+// is kept as is; modules the plugin did not mention get the package scope.
+func (g *Graph) fillModules() {
+	for _, m := range g.Nodes {
+		if !m.IsModule() {
+			continue
+		}
+		seen := map[string]bool{m.ID: true}
+		queue := []string{m.ID}
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			for _, c := range g.children[cur] {
+				if seen[c] {
+					continue
+				}
+				seen[c] = true
+				n := &g.Nodes[g.index[c]]
+				if n.IsModule() {
+					continue
+				}
+				queue = append(queue, c)
+				if n.Modules == nil {
+					n.Modules = map[string]string{}
+				}
+				if _, ok := n.Modules[m.ID]; !ok {
+					n.Modules[m.ID] = n.Scope
+				}
+			}
+		}
+	}
 }
 
 func (g *Graph) reindex() {
@@ -170,11 +254,22 @@ func (g *Graph) Node(id string) (Node, bool) {
 	return g.Nodes[i], true
 }
 
-// Packages returns all nodes except the root.
+// Packages returns all package nodes (neither the root nor modules).
 func (g *Graph) Packages() []Node {
 	out := make([]Node, 0, len(g.Nodes))
 	for _, n := range g.Nodes {
-		if n.ID != g.Root {
+		if n.ID != g.Root && !n.IsModule() {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Modules returns the module nodes, sorted by ID.
+func (g *Graph) Modules() []Node {
+	var out []Node
+	for _, n := range g.Nodes {
+		if n.IsModule() {
 			out = append(out, n)
 		}
 	}
@@ -187,6 +282,35 @@ func (g *Graph) Children(id string) []string {
 		g.reindex()
 	}
 	return g.children[id]
+}
+
+// Affected returns what a change of the package id may alter, for
+// sdk.Remediation.Affects: the package and every package it currently brings
+// in (transitively), as sorted package URLs without version.
+func (g *Graph) Affected(id string) []string {
+	seen := map[string]bool{}
+	keys := map[string]bool{}
+	stack := []string{id}
+	for len(stack) > 0 {
+		cur := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[cur] {
+			continue
+		}
+		seen[cur] = true
+		key := cur
+		if p, err := purl.Parse(cur); err == nil {
+			key = p.WithoutVersion().String()
+		}
+		keys[key] = true
+		stack = append(stack, g.Children(cur)...)
+	}
+	out := make([]string, 0, len(keys))
+	for k := range keys {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // maxPaths caps Paths when no limit is given.
@@ -289,10 +413,18 @@ func (g *Graph) DirectAncestors(id string) []string {
 		return nil
 	}
 	direct := map[string]bool{}
-	for _, c := range g.children[g.Root] {
-		direct[c] = true
+	for _, n := range g.Nodes {
+		if n.IsModule() || n.ID == g.Root {
+			continue
+		}
+		for _, p := range g.parents[n.ID] {
+			if g.declares(p) {
+				direct[n.ID] = true
+			}
+		}
 	}
-	// Breadth-first over parents gives every ancestor its distance to id.
+	// Breadth-first over parents gives every ancestor its distance to id;
+	// modules and the root end the walk.
 	dist := map[string]int{id: 0}
 	queue := []string{id}
 	var out []string
@@ -303,7 +435,7 @@ func (g *Graph) DirectAncestors(id string) []string {
 			out = append(out, cur)
 		}
 		for _, p := range g.parents[cur] {
-			if _, seen := dist[p]; !seen && p != g.Root {
+			if _, seen := dist[p]; !seen && !g.declares(p) {
 				dist[p] = dist[cur] + 1
 				queue = append(queue, p)
 			}
@@ -381,4 +513,82 @@ func (g *Graph) Validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// ModuleRefs lists the modules that reach a package, sorted by name, with
+// the package scope in each and whether the module declares it itself.
+func (g *Graph) ModuleRefs(id string) []sdk.ModuleRef {
+	n, ok := g.Node(id)
+	if !ok || len(n.Modules) == 0 {
+		return nil
+	}
+	out := make([]sdk.ModuleRef, 0, len(n.Modules))
+	for mid, scope := range n.Modules {
+		name := mid
+		if m, ok := g.Node(mid); ok && m.Name != "" {
+			name = m.Name
+		}
+		out = append(out, sdk.ModuleRef{ID: mid, Name: name, Scope: scope, Direct: contains(g.children[mid], id)})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// DeclaringModule returns the module that declares a package on the
+// shortest path to target (the package itself or a package below it), then
+// the first by name; ok is false when no module declares it.
+func (g *Graph) DeclaringModule(declared, target string) (Node, bool) {
+	for _, path := range g.Paths(target, 0) {
+		if len(path) < 2 {
+			continue
+		}
+		if m, ok := g.Node(path[0]); ok && m.IsModule() && path[1] == declared {
+			return m, true
+		}
+	}
+	var best *Node
+	for _, p := range g.parents[declared] {
+		if m, ok := g.Node(p); ok && m.IsModule() && (best == nil || m.Name < best.Name) {
+			mm := m
+			best = &mm
+		}
+	}
+	if best == nil {
+		return Node{}, false
+	}
+	return *best, true
+}
+
+// EntryModules returns the modules through which a package enters the
+// project from outside: the modules that reach it without passing through
+// another module, sorted by ID. It is empty in graphs without modules.
+func (g *Graph) EntryModules(id string) []string {
+	if g.index == nil {
+		g.reindex()
+	}
+	seen := map[string]bool{id: true}
+	queue := []string{id}
+	var out []string
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, p := range g.parents[cur] {
+			if seen[p] || p == g.Root {
+				continue
+			}
+			seen[p] = true
+			if n, ok := g.Node(p); ok && n.IsModule() {
+				out = append(out, p)
+				continue
+			}
+			queue = append(queue, p)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

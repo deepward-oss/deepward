@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <!-- Benchmark fixture for batch verification: six modules and about ten
+       vulnerable direct and transitive dependencies that do not overlap.
+       Their fixed versions bring no new vulnerable packages (for example,
+       commons-compress 1.26 would newly bring commons-lang3 and make the
+       commons-text upgrade fail in a batch), so both modes agree. -->
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example.many</groupId>
+  <artifactId>many-parent</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+
+  <modules>
+    <module>core</module>
+    <module>api</module>
+    <module>config</module>
+    <module>io</module>
+    <module>legacy</module>
+    <module>web</module>
+  </modules>
+
+  <properties>
+    <log4j.version>2.14.1</log4j.version>
+  </properties>
+</project>

@@ -33,17 +33,30 @@ func TestBuildGraphFromRealOutput(t *testing.T) {
 		}
 		return n
 	}
+	const core, root = "module:core", "module:root"
+	if len(g.Modules()) != 2 || node(core).Name != "core" || !node(root).IsModule() {
+		t.Fatalf("subprojects are modules: %+v", g.Modules())
+	}
+	if got := g.Children(root); !strings.Contains(strings.Join(got, ","), core) {
+		t.Errorf("root depends on core (dependsOn): %v", got)
+	}
+	// cats-core is declared by core and reaches root through it, compile in both.
 	cats := node("pkg:maven/org.typelevel/cats-core_2.13@2.9.0")
-	if !cats.Direct || cats.Attributes["scalaBase"] != "cats-core" || cats.Attributes["scalaSuffix"] != "_2.13" || cats.Attributes["projects"] != "core,root" {
+	if !cats.Direct || cats.Attributes["scalaBase"] != "cats-core" || cats.Attributes["scalaSuffix"] != "_2.13" ||
+		cats.Modules[core] != deps.ScopeCompile || cats.Modules[root] != deps.ScopeCompile || cats.Attributes["projects"] != "" {
 		t.Errorf("cats-core: %+v", cats)
+	}
+	if paths := g.Paths(cats.ID, 0); len(paths) == 0 || paths[0][0] != core {
+		t.Errorf("paths start at a subproject: %v", paths)
 	}
 	if kernel := node("pkg:maven/org.typelevel/cats-kernel_2.13@2.9.0"); kernel.Direct {
 		t.Error("cats-kernel is transitive")
 	}
-	if st := node("pkg:maven/org.scalatest/scalatest_2.13@3.2.15"); st.Scope != deps.ScopeTest {
-		t.Errorf("scalatest scope: %s", st.Scope)
+	// scalatest is a test dependency of core only.
+	if st := node("pkg:maven/org.scalatest/scalatest_2.13@3.2.15"); st.Scope != deps.ScopeTest || len(st.Modules) != 1 || st.Modules[core] != deps.ScopeTest {
+		t.Errorf("scalatest: %+v", st)
 	}
-	if jd := node("pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1"); !jd.Direct || jd.Attributes["projects"] != "root" {
+	if jd := node("pkg:maven/com.fasterxml.jackson.core/jackson-databind@2.12.1"); !jd.Direct || len(jd.Modules) != 1 || jd.Modules[root] != deps.ScopeCompile {
 		t.Errorf("jackson: %+v", jd)
 	}
 	if _, ok := g.Node("pkg:maven/com.acme/core_2.13@0.1.0"); ok {
@@ -72,6 +85,10 @@ func TestReportEdgeCases(t *testing.T) {
 	}
 	if n, _ := g.Node("pkg:maven/a/lib_3@1.0"); n.Attributes["scalaBinaryVersions"] != "3" {
 		t.Errorf("attributes: %+v", n.Attributes)
+	}
+	// One subproject: a flat graph without modules.
+	if n, _ := g.Node("pkg:maven/a/lib_3@1.0"); len(g.Modules()) != 0 || !n.Direct || n.Modules != nil {
+		t.Errorf("single subproject: %+v %+v", g.Modules(), n)
 	}
 	if _, err := ParseReports(strings.NewReader("")); err == nil {
 		t.Error("empty output")

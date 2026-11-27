@@ -132,7 +132,8 @@ func TestParseTreesAndBuildGraph(t *testing.T) {
 	if len(trees) != 3 {
 		t.Fatalf("trees: %d", len(trees))
 	}
-	g, err := BuildGraph("project:maven:.", "test", trees)
+	poms := map[string]string{"com.acme:billing-parent": "pom.xml", "com.acme:billing-core": "core/pom.xml", "com.acme:billing-web": "web/pom.xml"}
+	g, err := BuildGraph("project:maven:.", "test", trees, poms)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,17 +144,31 @@ func TestParseTreesAndBuildGraph(t *testing.T) {
 		}
 		return n
 	}
+	const core, web = "module:core/pom.xml", "module:web/pom.xml"
+	if len(g.Modules()) != 3 {
+		t.Fatalf("modules: %+v", g.Modules())
+	}
+	if m := node(core); !m.IsModule() || m.Name != "billing-core" || m.Attributes["manifest"] != "core/pom.xml" {
+		t.Errorf("core module: %+v", m)
+	}
+	if got := g.Children(web); !strings.Contains(strings.Join(got, ","), core) {
+		t.Errorf("web depends on the core module: %v", got)
+	}
 	log4j := node("pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1")
-	if !log4j.Direct || log4j.Attributes["modules"] != "billing-core" || log4j.Scope != "compile" {
-		t.Errorf("log4j-core: %+v", log4j)
+	if !log4j.Direct || log4j.Scope != "compile" || log4j.Modules[core] != "compile" || log4j.Modules[web] != "compile" || log4j.Attributes["modules"] != "" {
+		t.Errorf("log4j-core is declared by core and reaches web through it: %+v", log4j)
+	}
+	if paths := g.Paths(log4j.ID, 0); len(paths) == 0 || paths[0][0] != core {
+		t.Errorf("paths start at the declaring module: %v", paths)
 	}
 	if api := node("pkg:maven/org.apache.logging.log4j/log4j-api@2.14.1"); api.Direct {
 		t.Error("log4j-api is transitive")
 	}
-	if junit := node("pkg:maven/junit/junit@4.13.1"); junit.Scope != "test" {
-		t.Errorf("junit scope: %s", junit.Scope)
+	// junit is test-only in core and does not reach web through core.
+	if junit := node("pkg:maven/junit/junit@4.13.1"); junit.Scope != "test" || len(junit.Modules) != 1 || junit.Modules[core] != "test" {
+		t.Errorf("junit: %+v", junit)
 	}
-	if sy := node("pkg:maven/org.yaml/snakeyaml@1.33"); !sy.Direct || sy.Attributes["modules"] != "billing-web" {
+	if sy := node("pkg:maven/org.yaml/snakeyaml@1.33"); !sy.Direct || len(sy.Modules) != 1 || sy.Modules[web] != "compile" {
 		t.Errorf("snakeyaml: %+v", sy)
 	}
 	if _, ok := g.Node("pkg:maven/com.acme/billing-core@1.0.0"); ok {
@@ -178,9 +193,16 @@ func TestConflictResolutionAndScopes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := BuildGraph("project:x", "t", trees)
+	g, err := BuildGraph("project:x", "t", trees, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A single-module project keeps a flat graph.
+	if len(g.Modules()) != 0 {
+		t.Errorf("single module: %+v", g.Modules())
+	}
+	if a, _ := g.Node("pkg:maven/a/lib-a@1"); !a.Direct || a.Modules != nil {
+		t.Errorf("flat graph: %+v", a)
 	}
 	var jacksons []deps.Node
 	for _, n := range g.Packages() {
@@ -202,7 +224,7 @@ func TestConflictResolutionAndScopes(t *testing.T) {
 	if _, err := ParseTrees(strings.NewReader("{")); err == nil {
 		t.Error("invalid JSON")
 	}
-	if _, err := BuildGraph("project:x", "t", []TreeNode{{GroupID: "g", ArtifactID: "a", Children: []TreeNode{{GroupID: "x y", ArtifactID: "z", Version: "1"}}}}); err != nil {
+	if _, err := BuildGraph("project:x", "t", []TreeNode{{GroupID: "g", ArtifactID: "a", Children: []TreeNode{{GroupID: "x y", ArtifactID: "z", Version: "1"}}}}, nil); err != nil {
 		t.Logf("odd coordinates: %v", err)
 	}
 }

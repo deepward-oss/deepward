@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/deepward-oss/deepward/pkg/sdk"
 	"github.com/deepward-oss/deepward/pkg/sdk/purl"
@@ -34,8 +35,11 @@ type FixItem struct {
 	Unverified bool `json:"unverified,omitempty"`
 	// VerifyFailure says why verification failed.
 	VerifyFailure string `json:"verifyFailure,omitempty"`
-	// Tasks are the post tasks that ran after the change.
+	// Tasks are the post tasks that ran for the change request.
 	Tasks []string `json:"tasks,omitempty"`
+	// remedy is the remediation the item applies, realized again when the
+	// change set is assembled.
+	remedy sdk.Remediation
 }
 
 // ChangeSet is a verified set of edits for one project and group: the
@@ -59,6 +63,9 @@ type ChangeSet struct {
 	// Unverified is set when an item of the change failed verification.
 	Unverified bool     `json:"unverified"`
 	Labels     []string `json:"labels"`
+	// CustomTitle is set when Title comes from a fix.title pattern; the
+	// commit subject is then the title itself.
+	CustomTitle bool `json:"-"`
 }
 
 // ManualFix is a finding that needs a human.
@@ -88,6 +95,9 @@ type FixPlan struct {
 	// Filtered is the number of findings with remediations that fix.kinds
 	// or fix.minSeverity left out.
 	Filtered int `json:"filtered,omitempty"`
+	// GraphBuilds is the number of rescans verification ran, not counting
+	// the scan before verification or results reused for identical files.
+	GraphBuilds int `json:"-"`
 	// excluded holds "project\x00group" of the groups made only of
 	// filtered findings: Publish leaves their open requests alone.
 	excluded map[string]bool
@@ -128,9 +138,24 @@ func (e *Engine) PlanFixes(ctx context.Context) (*FixPlan, error) {
 	}
 	groups, excluded, filtered := e.groups(res, projects)
 	plan.excluded, plan.Filtered = excluded, filtered
-	e.progress(ctx, "verifying fixes", "groups", len(groups), "filtered", filtered)
+	mode := e.cfg.Fix.VerifyMode()
+	e.progress(ctx, "verifying fixes", "groups", len(groups), "filtered", filtered, "verify", mode)
 	start := e.clock.Now()
-	for _, o := range e.fixGroups(ctx, groups) {
+	memo := newVerifyMemo()
+	pool := e.startPool(len(groups), memo)
+	var outcomes []groupOutcome
+	if mode == VerifyEach {
+		outcomes = e.fixGroups(ctx, pool, groups)
+	} else {
+		outcomes = e.fixBatches(ctx, pool, groups)
+	}
+	pool.close()
+	if err := ctx.Err(); err != nil {
+		// Verdicts of a cancelled run are not trustworthy.
+		return nil, err
+	}
+	plan.GraphBuilds = memo.count()
+	for _, o := range outcomes {
 		if o.err != nil {
 			return nil, o.err
 		}
@@ -141,7 +166,7 @@ func (e *Engine) PlanFixes(ctx context.Context) (*FixPlan, error) {
 		}
 	}
 	e.progress(ctx, "fixes verified", "changeSets", len(plan.ChangeSets), "manual", len(plan.Manual), "failed", len(plan.Failed),
-		"duration", e.since(start))
+		"graphBuilds", plan.GraphBuilds, "duration", e.since(start))
 	sortChangeSets(plan.ChangeSets)
 	if err := e.checkBranches(plan.ChangeSets); err != nil {
 		return nil, err
@@ -172,68 +197,165 @@ type groupOutcome struct {
 	err    error
 }
 
-// fixGroups verifies the groups with fix.concurrency workers. Each worker
-// copies a project once and reuses the copy for all of its groups of that
-// project, restoring the edited files in between. Outcomes keep the order
-// of the groups.
-func (e *Engine) fixGroups(ctx context.Context, groups []*fixGroup) []groupOutcome {
-	out := make([]groupOutcome, len(groups))
+// fixPool runs fix jobs on fix.concurrency workers. Each worker copies a
+// project once and reuses the copy for every job of that project; a job
+// restores the edited files before it returns.
+type fixPool struct {
+	e    *Engine
+	memo *verifyMemo
+	jobs chan func(copies map[string]*scratch)
+	wg   sync.WaitGroup
+}
+
+// startPool starts min(fix.concurrency, jobs) workers (at least one).
+func (e *Engine) startPool(jobs int, memo *verifyMemo) *fixPool {
 	workers := e.cfg.Fix.Concurrency
 	if workers <= 0 {
 		workers = DefaultFixConcurrency
 	}
-	workers = min(workers, len(groups))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
+	workers = max(min(workers, jobs), 1)
+	p := &fixPool{e: e, memo: memo, jobs: make(chan func(map[string]*scratch))}
 	for range workers {
-		wg.Add(1)
+		p.wg.Add(1)
 		go func() {
-			defer wg.Done()
+			defer p.wg.Done()
 			copies := map[string]*scratch{}
 			defer func() {
 				for _, sc := range copies {
 					sc.close()
 				}
 			}()
-			for i := range jobs {
-				out[i] = e.fixGroupIn(ctx, copies, groups[i], fmt.Sprintf("%d/%d", i+1, len(groups)))
+			for job := range p.jobs {
+				job(copies)
 			}
 		}()
 	}
-	for i := range groups {
-		jobs <- i
+	return p
+}
+
+// run runs job on a worker and waits for it.
+func (p *fixPool) run(job func(copies map[string]*scratch)) {
+	done := make(chan struct{})
+	p.jobs <- func(copies map[string]*scratch) {
+		defer close(done)
+		job(copies)
 	}
-	close(jobs)
+	<-done
+}
+
+func (p *fixPool) close() {
+	close(p.jobs)
+	p.wg.Wait()
+}
+
+// copyOf returns the worker's copy of a project, making it on first use.
+func (p *fixPool) copyOf(copies map[string]*scratch, project sdk.Project) (*scratch, error) {
+	if sc := copies[project.ID]; sc != nil {
+		return sc, nil
+	}
+	sc, err := p.e.newScratch(project)
+	if err != nil {
+		return nil, err
+	}
+	sc.cache = p.memo
+	copies[project.ID] = sc
+	return sc, nil
+}
+
+// fixGroups verifies every group on its own (fix.verify: each). Outcomes
+// keep the order of the groups.
+func (e *Engine) fixGroups(ctx context.Context, pool *fixPool, groups []*fixGroup) []groupOutcome {
+	out := make([]groupOutcome, len(groups))
+	var wg sync.WaitGroup
+	for i, g := range groups {
+		wg.Add(1)
+		go pool.run(func(copies map[string]*scratch) {
+			defer wg.Done()
+			out[i] = e.fixGroupIn(ctx, pool, copies, g, fmt.Sprintf("%d/%d", i+1, len(groups)))
+		})
+	}
 	wg.Wait()
 	return out
 }
 
-// fixGroupIn verifies one group in the worker's copy of its project.
-func (e *Engine) fixGroupIn(ctx context.Context, copies map[string]*scratch, g *fixGroup, progress string) groupOutcome {
+// fixGroupIn verifies one group in the worker's copy of its project and
+// assembles its change set in the same copy, which then holds only the
+// group's verified changes.
+func (e *Engine) fixGroupIn(ctx context.Context, pool *fixPool, copies map[string]*scratch, g *fixGroup, progress string) groupOutcome {
 	if err := ctx.Err(); err != nil {
 		return groupOutcome{err: err}
 	}
-	sc := copies[g.project.ID]
-	if sc == nil {
-		var err error
-		if sc, err = e.newScratch(g.project); err != nil {
-			return groupOutcome{err: err}
-		}
-		copies[g.project.ID] = sc
+	sc, err := pool.copyOf(copies, g.project)
+	if err != nil {
+		return groupOutcome{err: err}
 	}
 	start := e.clock.Now()
 	e.progress(ctx, "verifying fix group", "group", g.name, "project", g.project.ID, "progress", progress)
 	var o groupOutcome
-	o.cs, o.manual, o.failed, o.err = e.fixGroup(ctx, sc, g)
+	var items []FixItem
+	items, o.manual, o.failed, o.err = e.fixGroup(ctx, sc, g)
+	if o.err == nil && len(items) > 0 {
+		var f *FailedFix
+		o.cs, f, o.err = e.assemble(ctx, sc, g, items, false)
+		if f != nil {
+			o.failed = append(o.failed, *f)
+		}
+	}
 	if err := sc.reset(); err != nil && o.err == nil {
 		o.err = err
 	}
+	e.groupDone(ctx, g, o.cs, start)
+	return o
+}
+
+func (e *Engine) groupDone(ctx context.Context, g *fixGroup, cs *ChangeSet, start time.Time) {
 	result := "change set ready"
-	if o.cs == nil {
+	if cs == nil {
 		result = "no verified change"
 	}
 	e.progress(ctx, "fix group done", "group", g.name, "project", g.project.ID, "result", result, "duration", e.since(start))
-	return o
+}
+
+// assemble turns a group's items into its change set: unless the copy
+// already holds exactly them (apply false), it restores the copy and
+// realizes and applies the items again; then it runs the post tasks once and
+// takes the diff. A failing post task drops the change set.
+func (e *Engine) assemble(ctx context.Context, sc *scratch, g *fixGroup, items []FixItem, apply bool) (*ChangeSet, *FailedFix, error) {
+	failed := func(reason string) *FailedFix {
+		return &FailedFix{Project: g.project.ID, Group: g.name, Rule: items[0].Findings[0].Rule, Reason: reason}
+	}
+	if apply {
+		if err := sc.reset(); err != nil {
+			return nil, nil, err
+		}
+		for _, it := range items {
+			edits, m := e.realize(ctx, sc, g.project, it.remedy)
+			if m != nil {
+				return nil, failed("the change could not be applied again: " + m.Reason), nil
+			}
+			if prev, err := sc.apply(edits); err != nil {
+				sc.rollback(prev)
+				return nil, failed("the change could not be applied again: " + err.Error()), nil
+			}
+		}
+	}
+	tasks, err := e.runPostTasks(ctx, sc, g.project, nil)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		return nil, failed(err.Error()), nil
+	}
+	for i := range items {
+		items[i].Tasks = tasks
+	}
+	cs := &ChangeSet{Project: g.project, Group: g.name, Items: items}
+	cs.Files, cs.Diff = sc.changes()
+	if len(cs.Files) == 0 {
+		return nil, failed("verification-failed: the change touched no file"), nil
+	}
+	e.describe(cs)
+	return cs, nil, nil
 }
 
 // ordered sorts the alternatives of a finding by fix.transitive: with
@@ -467,33 +589,87 @@ type verdict struct {
 	remaining bool
 }
 
+// verifyMemo holds verification scans by project, file contents and
+// analyzers, shared by every copy of one fix run, and counts the rescans
+// that actually ran.
+type verifyMemo struct {
+	mu      sync.Mutex
+	results map[string]*sdk.ScanResult
+	builds  int
+}
+
+func newVerifyMemo() *verifyMemo { return &verifyMemo{results: map[string]*sdk.ScanResult{}} }
+
+func (m *verifyMemo) count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.builds
+}
+
+// analyzersOf returns the sorted analyzers of the findings.
+func analyzersOf(findings []sdk.Finding) []string {
+	seen := map[string]bool{}
+	var ids []string
+	for _, f := range findings {
+		if !seen[f.Analyzer] {
+			seen[f.Analyzer] = true
+			ids = append(ids, f.Analyzer)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// rescan scans the project in the copy with the given analyzers, reusing
+// the result of a scan of identical files.
+func (e *Engine) rescan(ctx context.Context, sc *scratch, p sdk.Project, analyzers []string) (*sdk.ScanResult, error) {
+	key := p.ID + "\x00" + sc.hash() + strings.Join(analyzers, ",")
+	sc.cache.mu.Lock()
+	res, ok := sc.cache.results[key]
+	sc.cache.mu.Unlock()
+	if ok {
+		return res, nil
+	}
+	res, err := e.ScanWorkspace(withoutProgress(ctx), sc.ws, ScanFilter{Projects: []string{p.ID}, Analyzers: analyzers})
+	if err != nil {
+		return nil, err
+	}
+	sc.cache.mu.Lock()
+	if _, ok := sc.cache.results[key]; !ok {
+		sc.cache.results[key] = res
+		sc.cache.builds++
+	}
+	sc.cache.mu.Unlock()
+	return res, nil
+}
+
+// buildFailure returns why the project failed in a verification scan, or ""
+// when it still builds.
+func buildFailure(res *sdk.ScanResult, p sdk.Project) string {
+	for _, pr := range res.Projects {
+		if pr.ID == p.ID && pr.Status != sdk.ProjectOK {
+			return "the project no longer builds: " + pr.Reason
+		}
+	}
+	return ""
+}
+
 // verify rescans the scratch copy and reports whether the targeted findings
 // are gone and the project still builds.
 func (e *Engine) verify(ctx context.Context, sc *scratch, p sdk.Project, findings []sdk.Finding) (verdict, error) {
-	analyzers := map[string]bool{}
-	for _, f := range findings {
-		analyzers[f.Analyzer] = true
+	res, err := e.rescan(ctx, sc, p, analyzersOf(findings))
+	if err != nil {
+		return verdict{}, err
 	}
-	ids := make([]string, 0, len(analyzers))
-	for a := range analyzers {
-		ids = append(ids, a)
+	if why := buildFailure(res, p); why != "" {
+		return verdict{why: why}, nil
 	}
-	sort.Strings(ids)
-	key := p.ID + "\x00" + sc.hash() + strings.Join(ids, ",")
-	res, ok := sc.cache[key]
-	if !ok {
-		var err error
-		res, err = e.ScanWorkspace(withoutProgress(ctx), sc.ws, ScanFilter{Projects: []string{p.ID}, Analyzers: ids})
-		if err != nil {
-			return verdict{}, err
-		}
-		sc.cache[key] = res
-	}
-	for _, pr := range res.Projects {
-		if pr.ID == p.ID && pr.Status != sdk.ProjectOK {
-			return verdict{why: "the project no longer builds: " + pr.Reason}, nil
-		}
-	}
+	return judge(res, findings), nil
+}
+
+// judge reports whether the findings are gone from a scan of a project that
+// builds.
+func judge(res *sdk.ScanResult, findings []sdk.Finding) verdict {
 	remaining := map[string]bool{}
 	for _, f := range res.Findings {
 		remaining[f.Fingerprint] = true
@@ -509,63 +685,82 @@ func (e *Engine) verify(ctx context.Context, sc *scratch, p sdk.Project, finding
 		if len(still) > 1 {
 			verb = "are"
 		}
-		return verdict{why: strings.Join(still, ", ") + " " + verb + " still reported after the change", remaining: true}, nil
+		return verdict{why: strings.Join(still, ", ") + " " + verb + " still reported after the change", remaining: true}
 	}
-	return verdict{ok: true}, nil
+	return verdict{ok: true}
 }
 
-func (e *Engine) fixGroup(ctx context.Context, sc *scratch, g *fixGroup) (*ChangeSet, []ManualFix, []FailedFix, error) {
-	cs := &ChangeSet{Project: g.project, Group: g.name}
+// phase is one list of alternatives tried for a target: the merged update
+// first (which must also clear the update's findings), then the security
+// alternatives.
+type phase struct {
+	alternatives []sdk.Remediation
+	findings     []sdk.Finding
+	upgrade      bool
+	updateType   string
+	// group and first are reported when no alternative of the phase passes.
+	group string
+	first sdk.Finding
+}
+
+func phases(g *fixGroup, t *target) []phase {
+	var out []phase
+	if t.upgrade != nil {
+		ph := phase{alternatives: []sdk.Remediation{*t.upgrade}, findings: append(append([]sdk.Finding{}, t.findings...), t.upgradeFindings...),
+			upgrade: true, group: t.upgradeGroup, first: t.upgradeFindings[0]}
+		ph.updateType, _ = t.upgradeFindings[0].Properties["updateType"].(string)
+		out = append(out, ph)
+	}
+	return append(out, phase{alternatives: t.alternatives, findings: t.findings, group: g.name, first: t.findings[0]})
+}
+
+// item returns the item of an alternative of the phase that passed.
+func (ph phase) item(alt sdk.Remediation) FixItem {
+	it := itemFor(alt, ph.findings)
+	if ph.upgrade {
+		it.Upgrade = true
+		if ph.updateType != "" {
+			it.UpdateType = ph.updateType
+		}
+	}
+	return it
+}
+
+// fixGroup verifies the targets of a group one after the other in the copy
+// (fix.verify: each). Accepted changes stay in the copy for the targets
+// that follow. When the update merged into a target is not possible, it is
+// reported on its own and the security alternatives are tried.
+func (e *Engine) fixGroup(ctx context.Context, sc *scratch, g *fixGroup) ([]FixItem, []ManualFix, []FailedFix, error) {
+	var items []FixItem
 	var manual []ManualFix
 	var failed []FailedFix
 	for _, t := range g.targets {
-		if t.upgrade != nil {
-			all := append(append([]sdk.Finding{}, t.findings...), t.upgradeFindings...)
-			it, m, why, err := e.attempt(ctx, sc, g.project, []sdk.Remediation{*t.upgrade}, all)
+		for _, ph := range phases(g, t) {
+			alt, unverified, m, why, err := e.attempt(ctx, sc, g.project, ph.alternatives, ph.findings)
 			if err != nil {
 				return nil, nil, nil, err
 			}
-			if it != nil {
-				it.Upgrade = true
-				if ut, ok := t.upgradeFindings[0].Properties["updateType"].(string); ok {
-					it.UpdateType = ut
+			if alt != nil {
+				it := ph.item(*alt)
+				if unverified != "" {
+					it.Unverified, it.VerifyFailure = true, unverified
 				}
-				cs.Items = append(cs.Items, *it)
-				continue
+				items = append(items, it)
+				break
 			}
-			// The update is not possible: report it on its own and fall back
-			// to the security fix alone.
-			manual, failed = report(manual, failed, g.project.ID, t.upgradeGroup, t.upgradeFindings[0], m, why)
+			manual, failed = report(manual, failed, g.project.ID, ph.group, ph.first, m, why)
 		}
-		it, m, why, err := e.attempt(ctx, sc, g.project, t.alternatives, t.findings)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if it != nil {
-			cs.Items = append(cs.Items, *it)
-			continue
-		}
-		manual, failed = report(manual, failed, g.project.ID, g.name, t.findings[0], m, why)
 	}
-	if len(cs.Items) == 0 {
-		return nil, manual, failed, nil
-	}
-	cs.Files, cs.Diff = sc.changes()
-	if len(cs.Files) == 0 {
-		return nil, manual, append(failed, FailedFix{Project: g.project.ID, Group: g.name, Rule: g.targets[0].findings[0].Rule,
-			Reason: "verification-failed: the change touched no file"}), nil
-	}
-	e.describe(cs)
-	return cs, manual, failed, nil
+	return items, manual, failed, nil
 }
 
 // attempt applies the first alternative that clears every finding and keeps
-// the project building. Without one, it returns the last manual change or
-// verification failure; with fix.unverified.publish, the first alternative
-// (in the order of preference) that kept the project building is applied
-// again and returned marked unverified.
+// the project building, and returns it. Without one, it returns the last
+// manual change or verification failure; with fix.unverified.publish, the
+// first alternative (in the order of preference) that kept the project
+// building is applied again and returned with why it is unverified.
 func (e *Engine) attempt(ctx context.Context, sc *scratch, p sdk.Project, alternatives []sdk.Remediation,
-	findings []sdk.Finding) (*FixItem, *sdk.ManualChange, string, error) {
+	findings []sdk.Finding) (*sdk.Remediation, string, *sdk.ManualChange, string, error) {
 	var lastManual *sdk.ManualChange
 	var lastFailure string
 	var candidate *sdk.Remediation
@@ -573,9 +768,9 @@ func (e *Engine) attempt(ctx context.Context, sc *scratch, p sdk.Project, altern
 	for _, alt := range alternatives {
 		start := e.clock.Now()
 		e.progress(ctx, "verifying change", "project", p.ID, "change", alt.Description)
-		tasks, v, m, err := e.try(ctx, sc, p, alt, findings)
+		v, m, err := e.try(ctx, sc, p, alt, findings)
 		if err != nil {
-			return nil, nil, "", err
+			return nil, "", nil, "", err
 		}
 		if m != nil {
 			lastManual = m
@@ -591,63 +786,45 @@ func (e *Engine) attempt(ctx context.Context, sc *scratch, p sdk.Project, altern
 			continue
 		}
 		e.progress(ctx, "change verified", "project", p.ID, "change", alt.Description, "duration", e.since(start))
-		it := itemFor(alt, findings)
-		it.Tasks = tasks
-		return &it, nil, "", nil
+		return &alt, "", nil, "", nil
 	}
 	if candidate == nil || !e.cfg.Fix.Unverified.Publish {
-		return nil, lastManual, lastFailure, nil
+		return nil, "", lastManual, lastFailure, nil
 	}
 	// Apply the candidate again (without verifying it) to publish it.
 	edits, m := e.realize(ctx, sc, p, *candidate)
 	if m != nil {
-		return nil, m, lastFailure, nil
+		return nil, "", m, lastFailure, nil
 	}
-	prev, err := sc.apply(edits)
-	if err != nil {
+	if prev, err := sc.apply(edits); err != nil {
 		sc.rollback(prev)
-		return nil, nil, lastFailure, nil
-	}
-	tasks, err := e.runPostTasks(ctx, sc, p, prev)
-	if err != nil {
-		sc.rollback(prev)
-		return nil, nil, lastFailure, nil
+		return nil, "", nil, lastFailure, nil
 	}
 	e.log.WarnContext(ctx, "publishing unverified change", "project", p.ID, "change", candidate.Description, "reason", candidateWhy)
-	it := itemFor(*candidate, findings)
-	it.Unverified, it.VerifyFailure, it.Tasks = true, candidateWhy, tasks
-	return &it, nil, "", nil
+	return candidate, candidateWhy, nil, "", nil
 }
 
-// try applies one alternative, runs the post tasks and verifies the result.
-// A rejected change is rolled back.
+// try applies one alternative and verifies the result. A rejected change is
+// rolled back.
 func (e *Engine) try(ctx context.Context, sc *scratch, p sdk.Project, alt sdk.Remediation,
-	findings []sdk.Finding) ([]string, verdict, *sdk.ManualChange, error) {
+	findings []sdk.Finding) (verdict, *sdk.ManualChange, error) {
 	edits, m := e.realize(ctx, sc, p, alt)
 	if m != nil {
-		return nil, verdict{}, m, nil
+		return verdict{}, m, nil
 	}
 	prev, err := sc.apply(edits)
 	if err != nil {
 		sc.rollback(prev)
-		return nil, verdict{why: err.Error()}, nil, nil
-	}
-	tasks, err := e.runPostTasks(ctx, sc, p, prev)
-	if err != nil {
-		sc.rollback(prev)
-		if ctx.Err() != nil {
-			return nil, verdict{}, nil, ctx.Err()
-		}
-		return nil, verdict{why: err.Error()}, nil, nil
+		return verdict{why: err.Error()}, nil, nil
 	}
 	v, err := e.verify(ctx, sc, p, findings)
 	if err != nil {
-		return nil, verdict{}, nil, err
+		return verdict{}, nil, err
 	}
 	if !v.ok {
 		sc.rollback(prev)
 	}
-	return tasks, v, nil, nil
+	return v, nil, nil
 }
 
 // report records a finding that could not be fixed automatically.
@@ -667,7 +844,7 @@ func report(manual []ManualFix, failed []FailedFix, project, group string, first
 
 func itemFor(alt sdk.Remediation, findings []sdk.Finding) FixItem {
 	f := findings[0]
-	it := FixItem{Kind: f.Kind, Findings: findings}
+	it := FixItem{Kind: f.Kind, Findings: findings, remedy: alt}
 	if alt.Package != nil {
 		it.Package, it.From, it.To, it.Pin = alt.Package.PURL, alt.Package.From, alt.Package.To, alt.Package.Pin
 	} else {
@@ -743,16 +920,28 @@ func (e *Engine) describe(cs *ChangeSet) {
 		}
 		cs.Labels = append(cs.Labels, un...)
 	}
-	cs.Title = "Deepward: " + e.titleText(cs)
-	if cs.Unverified {
-		cs.Title = "Deepward: [unverified] " + e.titleText(cs)
-	}
-	if cs.Project.Dir != "." && cs.Project.Dir != "" {
-		cs.Title += " in " + cs.Project.Dir
+	// Markers are added after the text is cut to length, so they survive.
+	text, custom := e.customTitle(cs)
+	var prefix, suffix string
+	if custom {
+		if cs.Unverified {
+			prefix = "[unverified] "
+		}
+	} else {
+		prefix = "Deepward: "
+		if cs.Unverified {
+			prefix += "[unverified] "
+		}
+		text = e.titleText(cs)
+		if cs.Project.Dir != "." && cs.Project.Dir != "" {
+			text += " in " + cs.Project.Dir
+		}
 	}
 	if cs.NotBuilt {
-		cs.Title += " (not built)"
+		suffix = " (not built)"
 	}
+	cs.CustomTitle = custom
+	cs.Title = prefix + clampTitle(text, maxTitleLength-len([]rune(prefix))-len([]rune(suffix))) + suffix
 }
 
 func (e *Engine) titleText(cs *ChangeSet) string {

@@ -122,6 +122,9 @@ func TestAnalyzeConformsAndMatches(t *testing.T) {
 	if len(l.Remediations) != 1 || l.Remediations[0].Package.To != "2.16.0" || l.Remediations[0].Package.Pin {
 		t.Errorf("direct remediation: %+v", l.Remediations)
 	}
+	if got := strings.Join(l.Remediations[0].Affects, ","); !strings.HasPrefix(got, "pkg:maven/org.apache.logging.log4j/log4j-core") {
+		t.Errorf("direct upgrade affects the package: %s", got)
+	}
 	if !strings.HasSuffix(l.Properties["details"].(string), "…") || l.Properties["published"] != "2021-12-10" || l.Properties["cvss"] == nil {
 		t.Error("properties")
 	}

@@ -233,22 +233,46 @@ func (m *model) pin(projectFiles []string, props string, change sdk.PackageChang
 	reason := strings.ReplaceAll(firstNonEmpty(change.Reason, "fixes a vulnerable transitive dependency"), "--", "-")
 	comment := "<!-- Deepward: pinned transitive dependency: " + reason + " -->"
 	var edits []sdk.TextEdit
+	targets := pinTargets(projectFiles, change.Targets)
 	if m.central && props != "" {
 		edits = append(edits, m.insert(props, "PackageVersion", comment, fmt.Sprintf(`<PackageVersion Include="%s" Version="%s" />`, id, change.To)))
 		if m.pinning {
 			return edits, nil
 		}
-		if len(projectFiles) == 0 {
+		if len(targets) == 0 {
 			return nil, &sdk.ManualChange{Change: change, Reason: "no project file to reference the pinned package"}
 		}
-		edits = append(edits, m.insert(projectFiles[0], "PackageReference", comment, fmt.Sprintf(`<PackageReference Include="%s" />`, id)))
+		for _, f := range targets {
+			edits = append(edits, m.insert(f, "PackageReference", comment, fmt.Sprintf(`<PackageReference Include="%s" />`, id)))
+		}
 		return edits, nil
 	}
-	if len(projectFiles) == 0 {
+	if len(targets) == 0 {
 		return nil, &sdk.ManualChange{Change: change, Reason: "no project file to pin the package in"}
 	}
-	edits = append(edits, m.insert(projectFiles[0], "PackageReference", comment, fmt.Sprintf(`<PackageReference Include="%s" Version="%s" />`, id, change.To)))
+	for _, f := range targets {
+		edits = append(edits, m.insert(f, "PackageReference", comment, fmt.Sprintf(`<PackageReference Include="%s" Version="%s" />`, id, change.To)))
+	}
 	return edits, nil
+}
+
+// pinTargets returns the project files a pin goes to: the change's targets
+// that are project files of the project (the modules the package enters
+// through), else the first project file.
+func pinTargets(projectFiles, targets []string) []string {
+	var out []string
+	for _, t := range targets {
+		for _, f := range projectFiles {
+			if f == t {
+				out = append(out, f)
+				break
+			}
+		}
+	}
+	if len(out) == 0 && len(projectFiles) > 0 {
+		out = projectFiles[:1]
+	}
+	return out
 }
 
 // insert adds an element to the first ItemGroup holding elements of kind,

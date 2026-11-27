@@ -105,7 +105,14 @@ type FixConfig struct {
 	// brings it, "pin" pins its version. The other is tried when the first
 	// does not pass verification.
 	Transitive string `yaml:"transitive" enum:"upgrade,pin"`
-	// PostTasks run after each change is applied and before it is verified.
+	// Verify selects how changes are verified: "batch" (default) verifies
+	// independent changes of several change requests in one graph rebuild,
+	// "each" rebuilds the graph for every alternative.
+	Verify string `yaml:"verify" enum:"batch,each"`
+	// Title holds change request title patterns per kind of request.
+	Title TitleConfig `yaml:"title"`
+	// PostTasks run once per change request, after its changes are verified
+	// and before they are committed.
 	PostTasks []PostTask `yaml:"postTasks"`
 	// Unverified decides what happens to changes whose verification found
 	// the targeted findings still reported.
@@ -130,6 +137,20 @@ const (
 	TransitivePin     = "pin"
 	TransitiveUpgrade = "upgrade"
 )
+
+// Values of fix.verify.
+const (
+	VerifyBatch = "batch"
+	VerifyEach  = "each"
+)
+
+// VerifyMode returns fix.verify with its default applied.
+func (c FixConfig) VerifyMode() string {
+	if c.Verify == "" {
+		return VerifyBatch
+	}
+	return c.Verify
+}
 
 // DefaultFixConcurrency is the default of fix.concurrency.
 const DefaultFixConcurrency = 2
@@ -235,10 +256,16 @@ func (c *Config) Validate() error {
 	if c.Fix.Concurrency < 0 {
 		errs = append(errs, errors.New("fix.concurrency must be >= 0"))
 	}
+	errs = append(errs, c.Fix.Title.validate()...)
 	switch c.Fix.Transitive {
 	case "", TransitivePin, TransitiveUpgrade:
 	default:
 		errs = append(errs, fmt.Errorf("fix.transitive: %q is not one of %s, %s", c.Fix.Transitive, TransitivePin, TransitiveUpgrade))
+	}
+	switch c.Fix.Verify {
+	case "", VerifyBatch, VerifyEach:
+	default:
+		errs = append(errs, fmt.Errorf("fix.verify: %q is not one of %s, %s", c.Fix.Verify, VerifyBatch, VerifyEach))
 	}
 	for i, t := range c.Fix.PostTasks {
 		if t.Tool == "" {

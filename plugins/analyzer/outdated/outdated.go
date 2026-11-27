@@ -154,30 +154,43 @@ func (a *Analyzer) Analyze(ctx context.Context, req sdk.AnalyzeRequest) ([]sdk.F
 		if !u.Any() {
 			continue
 		}
-		out = append(out, finding(req, n, pkg, u))
+		out = append(out, finding(req, graph, n, pkg, u))
 	}
 	return out, nil
 }
 
-func finding(req sdk.AnalyzeRequest, n deps.Node, pkg string, u domain.Updates) sdk.Finding {
+func finding(req sdk.AnalyzeRequest, g *deps.Graph, n deps.Node, pkg string, u domain.Updates) sdk.Finding {
 	target := u.Latest
+	// In a project with modules: the modules that declare the dependency,
+	// and the manifest of the first of them by name.
+	var declaring []sdk.ModuleRef
+	var preferred []string
+	for _, m := range g.ModuleRefs(n.ID) {
+		if !m.Direct {
+			continue
+		}
+		declaring = append(declaring, m)
+		if mod, ok := g.Node(m.ID); ok && len(preferred) == 0 && mod.Attributes["manifest"] != "" {
+			preferred = append(preferred, mod.Attributes["manifest"])
+		}
+	}
 	return sdk.Finding{
 		Analyzer: ID, Rule: "update-" + string(u.Type), Kind: sdk.KindOutdated, Severity: sdk.SeverityNone,
 		Title:   fmt.Sprintf("%s update available", u.Type),
 		Message: fmt.Sprintf("%s %s → %s available (%s)", n.Name, n.Version, target, u.Type),
 		Project: req.Project.ID,
-		Locations: []sdk.Location{{File: manifestLocation(req, n),
-			Package: &sdk.PackageLocation{PURL: n.ID, Direct: true, Scope: n.Scope}}},
+		Locations: []sdk.Location{{File: manifestLocation(req, n, preferred...),
+			Package: &sdk.PackageLocation{PURL: n.ID, Direct: true, Scope: n.Scope, Modules: declaring}}},
 		Properties: map[string]any{
 			"package": map[string]any{"name": n.Name, "version": n.Version, "ecosystem": string(n.Ecosystem)},
 			"current": n.Version, "patch": u.Patch, "minor": u.Minor, "major": u.Major, "latest": u.Latest, "updateType": string(u.Type),
 		},
 		Remediations: []sdk.Remediation{{Description: fmt.Sprintf("update %s %s → %s", n.Name, n.Version, target),
-			Group: "updates/" + n.Name, Package: &sdk.PackageChange{PURL: pkg, From: n.Version, To: target, Reason: string(u.Type) + " update"}}},
+			Group: "updates/" + n.Name, Affects: g.Affected(n.ID), Package: &sdk.PackageChange{PURL: pkg, From: n.Version, To: target, Reason: string(u.Type) + " update"}}},
 	}
 }
 
-func manifestLocation(req sdk.AnalyzeRequest, n deps.Node) *sdk.FileLocation {
+func manifestLocation(req sdk.AnalyzeRequest, n deps.Node, preferred ...string) *sdk.FileLocation {
 	if len(req.Project.Manifests) == 0 {
 		return &sdk.FileLocation{Path: req.Project.Dir}
 	}
@@ -189,7 +202,7 @@ func manifestLocation(req sdk.AnalyzeRequest, n deps.Node) *sdk.FileLocation {
 		needle = base
 	}
 	if req.Workspace != nil && req.Workspace.FS != nil {
-		for _, m := range req.Project.Manifests {
+		for _, m := range append(append([]string{}, preferred...), req.Project.Manifests...) {
 			data, err := fs.ReadFile(req.Workspace.FS, m)
 			if err != nil {
 				continue

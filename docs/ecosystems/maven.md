@@ -22,8 +22,26 @@ mvn -B -q -f <project>/pom.xml \
 
 The plugin goal is invoked by full coordinates, so your POM is not modified
 and the plugin is downloaded through your normal mirror. The module trees are
-merged into one project graph. Reactor modules are not graph nodes. Each
-direct dependency records the modules that declare it (`modules` attribute).
+merged into one project graph.
+
+### Modules
+
+In a reactor with more than one module, every module is a **module** of the
+project (named by its artifactId), so findings and reports say where a
+package comes from:
+
+- dependency paths start at a module: `billing-web → billing-core →
+  log4j-core` (a reactor module that another module depends on is a step in
+  the path, not a package);
+- every package records its scope in each module that reaches it, taken from
+  that module's own tree: a library that is `test` in every module is `test`,
+  and the test dependencies of `billing-core` do not show up in
+  `billing-web`;
+- a finding lists the affected modules and points at the declaring line in
+  the POM of the module that declares the dependency.
+
+A single-module project has no modules: its paths start at the dependency,
+as before.
 
 Requirements: Maven 3.6.3 or later (the default `maven-dependency-plugin`
 3.8.1 needs it). Use `mvnw` in the repository, or see [toolchain.md](../toolchain.md).

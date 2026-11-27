@@ -123,8 +123,11 @@ fix:
   maxCandidates: 5
   minSeverity: high             # fix only findings at or above this severity
   kinds: [vulnerability]        # fix only these finding kinds (default: all)
-  concurrency: 2                # change groups verified in parallel
+  concurrency: 2                # verification jobs run in parallel
+  verify: batch                 # batch or each, see Speed
   transitive: upgrade           # upgrade or pin: what is tried first for transitive vulnerabilities
+  title:                        # title patterns per kind of request, see Titles
+    security: "fix(deps): bump {name} from {from} to {to}"
   groups:
     - name: jackson
       match: ["pkg:maven/com.fasterxml.jackson*/*"]
@@ -163,6 +166,101 @@ fix:
 Open requests of the findings that are left out are neither updated nor
 closed: they stay as they are until you close them or widen the filters.
 
+### Titles
+
+`title` sets the title of change requests with one pattern per kind of
+request, using `{placeholder}`s like `branch`. A kind without a pattern keeps
+the default title, for example
+`Deepward: fix vulnerabilities: at.yawk.lz4:lz4-java 1.11.2 → 1.11.4`.
+
+| Kind | Request |
+|------|---------|
+| `security` | fixes vulnerabilities with one package change (an update merged into the fix included) |
+| `pin` | pins a transitive version; uses `security` when not set |
+| `update` | updates one outdated dependency |
+| `group` | has several package changes (`groups` rules, `grouping: type` or `project`) |
+
+| Placeholder | Value |
+|-------------|-------|
+| `{package}` | the package as its ecosystem names it: `org.apache.kafka:kafka-clients`, `@scope/name` |
+| `{name}` | the part after the last `:` or `/`: `kafka-clients` |
+| `{from}`, `{to}` | the versions |
+| `{update}` | `patch`, `minor` or `major` (updates only) |
+| `{severity}` | the highest severity of the fixed vulnerabilities |
+| `{count}` | the number of package changes |
+| `{group}` | the group: `kafka-clients`, `jackson`, `security`, `all` |
+| `{project}` | the project directory; empty at the repository root |
+| `{ecosystem}` | `maven`, `npm`, `go`, ... |
+
+In a `group` request `{package}`, `{name}`, `{from}`, `{to}` and `{update}`
+are empty. At the repository root `{project}` disappears together with the
+brackets around it and a preposition before it (`in`, `for`, `at`), so
+`fix({project}): …` becomes `fix: …`. Requests with unverified changes
+always start with `[unverified] `, and requests for packages that are not
+built always end with ` (not built)`. When a title
+comes from a pattern, the commit subject is the same title, so Conventional
+Commits reach the git history too. Titles are cut to 255 characters.
+
+Conventional Commits:
+
+```yaml
+fix:
+  title:
+    security: "fix(deps): bump {name} from {from} to {to}"
+    pin: "fix(deps): pin {name} to {to}"
+    update: "chore(deps): bump {name} from {from} to {to}"
+    group: "chore(deps): update {group} ({count} packages)"
+```
+
+```text
+fix(deps): bump kafka-clients from 4.4.0 to 4.5.0
+fix(deps): pin zookeeper to 3.9.5
+chore(deps): bump grpc-stub from 1.85.1 to 1.86.0
+chore(deps): update jackson (3 packages)
+```
+
+The project as the scope, for monorepos (`fix: …` at the root):
+
+```yaml
+fix:
+  title:
+    security: "fix({project}): {name} {from} → {to}"
+    update: "chore({project}): {name} {from} → {to}"
+```
+
+The project after a preposition (`… in services/api`, nothing at the root):
+
+```yaml
+fix:
+  title:
+    security: "Fix {name} {from} → {to} in {project}"
+    pin: "Pin {name} to {to} in {project}"
+    update: "Update {name} {from} → {to} ({update}) in {project}"
+    group: "Update the {group} dependencies ({count}) in {project}"
+```
+
+Severity or update type first, to scan the request list:
+
+```yaml
+fix:
+  title:
+    security: "[{severity}] {package}: {from} → {to}"
+    update: "[{update}] {package}: {from} → {to}"
+```
+
+Like Dependabot:
+
+```yaml
+fix:
+  title:
+    security: "Bump {package} from {from} to {to}"
+    update: "Bump {package} from {from} to {to}"
+    group: "Bump the {group} group with {count} updates"
+```
+
+Changing a pattern renames open requests on the next run; their branches,
+and so the requests themselves, stay the same.
+
 ### Transitive vulnerabilities
 
 A vulnerable transitive dependency can be fixed by pinning its version or by
@@ -179,10 +277,11 @@ The other one is tried when the first does not pass verification.
 
 ### Post tasks
 
-Like Renovate's `postUpgradeTasks`, `postTasks` run in the copy of the
-project after each change is applied and before it is verified, so the
-change request can carry files that depend on dependency versions:
-generated code, checksums, lockfiles of other tools.
+Like Renovate's `postUpgradeTasks`, `postTasks` run once per change
+request: after its changes are verified, in a copy of the project that holds
+only that request's changes, and before they are committed. What they
+regenerate (generated code, checksums, lockfiles of other tools) goes into
+the same commit as the version edits.
 
 ```yaml
 fix:
@@ -200,10 +299,13 @@ fix:
   number of directories). Changes to other files, including deletions, are
   undone; without `files` every change outside excluded directories such as
   `target/` is kept.
-- A task that fails rejects the change, like a failed verification, with the
-  command and the last line of its output as the reason.
-- The tasks run for every alternative Deepward tries, so they should be
-  quick; their commands are listed in the change request.
+- A task that fails drops the change request, which is reported as failed
+  with the command and the last line of its output as the reason; no other
+  alternative is tried for it. Other change requests are not affected.
+- The tasks do not run before verification, so verification does not see
+  their output. Lockfiles of npm, pnpm, Yarn and Cargo are regenerated by
+  Deepward itself when it edits the manifests, so they are verified.
+- Their commands are listed in the change request.
 - The commands come from `deepward.yaml` in the repository and run with the
   rights of the CI job, the same as setup steps.
 
@@ -224,11 +326,42 @@ gets a request marked `[unverified]` with a warning and the reason; see
 ### Speed
 
 Every change is verified by building the dependency graph again in a copy of
-the project, so a fix run takes about one build per change group, plus one
-per rejected alternative. `concurrency` (default 2) verifies that many groups
-at a time, each with its own copy of the project and its own build process;
-raise it on machines with spare CPU and memory. Narrowing the findings with
-`minSeverity` or `kinds` cuts the number of builds the most.
+the project. `verify` decides how many builds that takes:
+
+- `batch` (default): changes are verified in rounds. Each round takes the
+  next untried alternative of every vulnerability or update still without a
+  verified change, groups the changes of different change requests that
+  affect different packages into batches and builds the graph once per
+  batch. A batch that no longer builds is split in halves until the change
+  that breaks it is found; changes that break the build only together are
+  verified one by one. Twelve independent change requests take one build
+  instead of twelve.
+- `each`: every alternative gets its own build, about one per change
+  request plus one per rejected alternative. Use it when every change
+  request must be verified exactly as it will be merged, on its own.
+
+Independence is judged from the current dependency graph, so a new version
+that brings packages it did not bring before can still interact with
+another change in its batch. It can make a fix look ineffective: when
+upgrading `commons-compress` from 1.20 to 1.26 newly brings a vulnerable
+`commons-lang3`, the `commons-text` upgrade that fixes `commons-lang3` in the
+same batch still sees it reported, so Deepward falls back to the next
+alternative (a pin). Less often it can make a change look like a fix only
+thanks to the other change. Every published change is still verified, but
+the choice between alternatives can differ from `each`.
+
+Changes are independent when the packages they may alter do not overlap:
+for a pin or an upgrade, the package and every package it currently brings
+in. A change that does not say which packages it alters (text edits,
+external analyzers) is verified in a batch of its own. Both modes produce the
+same change requests for independent changes. The `fixes verified` log line
+reports `graphBuilds`, the number of builds verification needed.
+
+`concurrency` (default 2) runs that many verification jobs at a time (batches
+with `batch`, change requests with `each`), each with its own copy of the
+project and its own build process; raise it on machines with spare CPU and
+memory. Narrowing the findings with `minSeverity` or `kinds` cuts the number
+of builds too.
 
 ## Logging
 

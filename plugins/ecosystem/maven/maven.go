@@ -274,7 +274,22 @@ func (p *Plugin) Produce(ctx context.Context, req sdk.FactRequest) (any, error) 
 	if err != nil {
 		return nil, err
 	}
-	return domain.BuildGraph("project:"+project.ID, "mvn "+goal, trees)
+	return domain.BuildGraph("project:"+project.ID, "mvn "+goal, trees, p.modulePOMs(req.Workspace, project))
+}
+
+// modulePOMs maps "groupId:artifactId" of every reactor module to its POM.
+func (p *Plugin) modulePOMs(ws *sdk.Workspace, project sdk.Project) map[string]string {
+	out := map[string]string{}
+	for _, m := range project.Manifests {
+		data, err := fs.ReadFile(ws.FS, m)
+		if err != nil {
+			continue
+		}
+		if pom, err := domain.ParsePOM(data); err == nil && pom.ArtifactID.Text != "" {
+			out[pom.EffectiveGroupID()+":"+pom.ArtifactID.Text] = m
+		}
+	}
+	return out
 }
 
 // Versions implements deps.VersionRegistry.

@@ -77,7 +77,7 @@
   <div class="panel-head"><h2>Outdated dependencies</h2><span class="count" data-count-for="outdated-table">{{len .Outdated}}</span></div>
   <div class="scroll">
   <table class="findings" id="outdated-table">
-    <colgroup><col><col style="width:120px"><col style="width:120px"><col style="width:120px"><col style="width:120px"><col style="width:100px"><col style="width:140px"></colgroup>
+    <colgroup><col><col style="width:120px"><col style="width:120px"><col style="width:120px"><col style="width:120px"><col style="width:200px"><col style="width:140px"></colgroup>
     <thead><tr><th data-sort="text">Package</th><th data-sort="text">Current</th><th data-sort="text">Patch</th><th data-sort="text">Minor</th><th data-sort="text">Major</th><th data-sort="text">Dependency</th><th data-sort="text">Project</th></tr></thead>
     {{range .Outdated}}
     <tbody class="item" data-project="{{.Project}}" data-ecosystem="{{.Ecosystem}}" data-severity="none" data-direct="{{if .Direct}}direct{{else}}transitive{{end}}" data-search="{{.Search}}">
@@ -87,7 +87,7 @@
         <td class="cut v">{{with .Patch}}<span class="to">{{.}}</span>{{else}}<span class="dash">·</span>{{end}}</td>
         <td class="cut v">{{with .Minor}}<span class="to">{{.}}</span>{{else}}<span class="dash">·</span>{{end}}</td>
         <td class="cut v">{{with .Major}}<span class="to">{{.}}</span>{{else}}<span class="dash">·</span>{{end}}</td>
-        <td class="cut mono muted">{{if .Direct}}direct{{else}}transitive{{end}}</td>
+        <td class="cut mono muted" title="{{join .Modules ", "}}">{{if .Direct}}direct{{else}}transitive{{end}}{{with .Modules}} · {{join . ", "}}{{end}}</td>
         <td class="cut mono" title="{{.Project}}">{{.Project}}</td>
       </tr>
     </tbody>
@@ -194,7 +194,7 @@
         <dl class="kv">
           {{with .Recommendation}}<dt>action</dt><dd><div class="action">{{.}}</div></dd>{{end}}
           {{with .FixedIn}}<dt>fixed in</dt><dd class="v"><span class="to">{{.}}</span> <span class="faint">fixes every advisory below</span></dd>{{end}}
-          {{with .Chains}}<dt>path</dt><dd><ul class="chains">{{range .}}<li>{{range $i, $h := .}}{{if $i}}<span class="sep">→</span>{{end}}<span class="{{if $h.Target}}target{{else}}hop{{end}}">{{$h.Name}}<span class="faint">@{{$h.Version}}</span></span>{{end}}</li>{{end}}</ul></dd>{{end}}
+          {{with .Modules}}<dt>modules</dt><dd class="mods">{{range $i, $m := .}}{{if $i}}<span class="sep">·</span>{{end}}<span class="mod">{{$m.Name}}</span> <span class="faint">({{with $m.Scope}}{{.}}{{end}}{{if $m.Direct}}, direct{{end}})</span>{{end}}</dd>{{end}}{{with .Chains}}<dt>path</dt><dd><ul class="chains">{{range .}}<li>{{range $i, $h := .}}{{if $i}}<span class="sep">→</span>{{end}}{{if $h.Module}}<span class="mod">{{$h.Name}}</span>{{else}}<span class="{{if $h.Target}}target{{else}}hop{{end}}">{{$h.Name}}<span class="faint">@{{$h.Version}}</span></span>{{end}}{{end}}</li>{{end}}</ul></dd>{{end}}
           <dt>declared</dt><dd><code>{{.Location}}</code></dd>
         </dl>
         <table class="advisories">

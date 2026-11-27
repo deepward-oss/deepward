@@ -65,8 +65,20 @@ func Body(cs ChangeSet) string {
 		b.WriteString("> **Not built:** the affected packages are resolved dependencies of the project but are not compiled into it, " +
 			"so the vulnerable code does not ship. The update keeps the dependency files clean for other scanners and audits; it is not urgent.\n\n")
 	}
-	b.WriteString("| Package | Change | Type |\n|---|---|---|\n")
+	withModules := false
 	for _, it := range cs.Items {
+		withModules = withModules || len(itemModules(it)) > 0
+	}
+	if withModules {
+		b.WriteString("| Package | Change | Type | Modules |\n|---|---|---|---|\n")
+	} else {
+		b.WriteString("| Package | Change | Type |\n|---|---|---|\n")
+	}
+	for _, it := range cs.Items {
+		modules := ""
+		if withModules {
+			modules = " " + strings.Join(itemModules(it), ", ") + " |"
+		}
 		kind := it.UpdateType
 		switch {
 		case it.Pin:
@@ -81,10 +93,10 @@ func Body(cs ChangeSet) string {
 			kind = string(it.Kind)
 		}
 		if it.Text {
-			fmt.Fprintf(&b, "| %s | text edit | %s |\n", it.Package, kind)
+			fmt.Fprintf(&b, "| %s | text edit | %s |%s\n", it.Package, kind, modules)
 			continue
 		}
-		fmt.Fprintf(&b, "| `%s` | %s → **%s** | %s |\n", packageName(it.Package), it.From, it.To, kind)
+		fmt.Fprintf(&b, "| `%s` | %s → **%s** | %s |%s\n", packageName(it.Package), it.From, it.To, kind, modules)
 	}
 	var advisories []string
 	seen := map[string]bool{}
@@ -148,6 +160,22 @@ func Body(cs ChangeSet) string {
 	meta, _ := json.Marshal(Marker{Project: cs.Project.ID, Group: cs.Group, Items: items})
 	b.WriteString(markerPrefix + string(meta) + " -->\n")
 	return b.String()
+}
+
+// itemModules lists, sorted, the modules that the findings of an item affect.
+func itemModules(it FixItem) []string {
+	var out []string
+	for _, f := range it.Findings {
+		if p := f.PrimaryPackage(); p != nil {
+			for _, m := range p.Modules {
+				if !contains(out, m.Name) {
+					out = append(out, m.Name)
+				}
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // writeUnverified lists why each unverified item failed verification and
@@ -318,10 +346,21 @@ func (e *Engine) Publish(ctx context.Context, client sdk.PlatformClient, plan *F
 		mk, _ := ParseMarker(cr.Body)
 		// Requests of groups that fix.kinds or fix.minSeverity leave out are
 		// not managed in this run: they stay as they are.
-		if planned[b] || !scanned[mk.Project] || blocked[mk.Project+"\x00"+mk.Group] || plan.excluded[mk.Project+"\x00"+mk.Group] {
-			continue
+		comment := ""
+		if !planned[b] && !scanned[mk.Project] {
+			// A project that became part of a larger one (for example a .NET
+			// project file that is now a module of its solution).
+			if into := mergedInto(plan.Result, mk.Project); into != "" {
+				comment = "Deepward closed this request: project `" + mk.Project + "` is now part of project `" + into + "`, and its changes are proposed in that project's requests."
+			}
 		}
-		if err := client.Comment(ctx, cr.ID, closeComment(mk, carriedBy)); err != nil {
+		if comment == "" {
+			if planned[b] || !scanned[mk.Project] || blocked[mk.Project+"\x00"+mk.Group] || plan.excluded[mk.Project+"\x00"+mk.Group] {
+				continue
+			}
+			comment = closeComment(mk, carriedBy)
+		}
+		if err := client.Comment(ctx, cr.ID, comment); err != nil {
 			return res, err
 		}
 		if err := client.CloseChangeRequest(ctx, cr.ID); err != nil {
@@ -330,6 +369,35 @@ func (e *Engine) Publish(ctx context.Context, client sdk.PlatformClient, plan *F
 		res.Closed = append(res.Closed, cr)
 	}
 	return res, nil
+}
+
+// mergedInto returns the scanned project that now contains the directory of
+// a project that is no longer detected: a project of the same ecosystem
+// whose directory is at or above it and that lists a manifest inside it.
+// It returns "" otherwise, so requests of projects that failed, were
+// excluded or were removed stay open.
+func mergedInto(res *sdk.ScanResult, projectID string) string {
+	if res == nil {
+		return ""
+	}
+	eco, dir, ok := strings.Cut(projectID, ":")
+	if !ok || dir == "." || dir == "" {
+		return ""
+	}
+	for _, p := range res.Projects {
+		if p.Status != sdk.ProjectOK || p.Ecosystem != eco || p.ID == projectID {
+			continue
+		}
+		if p.Dir != "." && dir != p.Dir && !strings.HasPrefix(dir, p.Dir+"/") {
+			continue
+		}
+		for _, m := range p.Manifests {
+			if strings.HasPrefix(m, dir+"/") {
+				return p.ID
+			}
+		}
+	}
+	return ""
 }
 
 // closeComment explains why a request is closed: its changes moved to other
@@ -366,7 +434,11 @@ func human(commits []sdk.CommitInfo) bool {
 
 func commitMessage(cs ChangeSet) string {
 	var b strings.Builder
-	b.WriteString(strings.TrimPrefix(cs.Title, "Deepward: "))
+	if cs.CustomTitle {
+		b.WriteString(cs.Title)
+	} else {
+		b.WriteString(strings.TrimPrefix(cs.Title, "Deepward: "))
+	}
 	b.WriteString("\n\n")
 	for _, it := range cs.Items {
 		if it.Text {

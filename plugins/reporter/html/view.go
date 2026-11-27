@@ -38,6 +38,7 @@ type vulnRow struct {
 	Vector         string
 	Affected       []string
 	Chains         [][]hop
+	Modules        []sdk.ModuleRef
 	Recommendation string
 	References     []sdk.Reference
 	Location       string
@@ -63,6 +64,7 @@ type vulnGroup struct {
 	FixedIn        string
 	NoFix          bool
 	Chains         [][]hop
+	Modules        []sdk.ModuleRef
 	Recommendation string
 	Location       string
 	NotBuilt       bool
@@ -96,7 +98,7 @@ func groupVulns(rows []vulnRow) []vulnGroup {
 			i = len(out)
 			index[k] = i
 			out = append(out, vulnGroup{Package: r.Package, Version: r.Version, Project: r.Project, Ecosystem: r.Ecosystem, Direct: r.Direct,
-				Scope: r.Scope, FixedIn: r.FixedIn, NoFix: r.NoFix, Chains: r.Chains, Recommendation: r.Recommendation, Location: r.Location,
+				Scope: r.Scope, FixedIn: r.FixedIn, NoFix: r.NoFix, Chains: r.Chains, Modules: r.Modules, Recommendation: r.Recommendation, Location: r.Location,
 				NotBuilt: r.NotBuilt, Rank: -1})
 		}
 		g := &out[i]
@@ -130,11 +132,27 @@ func groupVulns(rows []vulnRow) []vulnGroup {
 	return out
 }
 
-// hop is one package on a dependency path.
+// hop is one package or module on a dependency path.
 type hop struct {
 	Name, Version string
 	// Target marks the vulnerable package at the end of the path.
 	Target bool
+	// Module marks a module of the project.
+	Module bool
+}
+
+// moduleHop names a module step of a path from the location's modules.
+func moduleHop(id string, modules []sdk.ModuleRef) (hop, bool) {
+	if !strings.HasPrefix(id, "module:") {
+		return hop{}, false
+	}
+	h := hop{Name: strings.TrimPrefix(id, "module:"), Module: true}
+	for _, m := range modules {
+		if m.ID == id && m.Name != "" {
+			h.Name = m.Name
+		}
+	}
+	return h, true
 }
 
 func hopOf(id string, target bool) hop {
@@ -155,6 +173,8 @@ func firstNonEmpty(vs ...string) string {
 }
 
 type outdatedRow struct {
+	// Modules are the modules that declare the dependency.
+	Modules    []string
 	Package    string
 	Current    string
 	Patch      string
@@ -374,9 +394,14 @@ func vulnRowOf(f sdk.Finding) vulnRow {
 			h := hopOf(p.PURL, false)
 			r.Package, r.Version = h.Name, firstNonEmpty(r.Version, h.Version)
 		}
+		r.Modules = p.Modules
 		for _, path := range p.Paths {
 			chain := make([]hop, 0, len(path))
 			for i, id := range path {
+				if h, ok := moduleHop(id, p.Modules); ok {
+					chain = append(chain, h)
+					continue
+				}
 				chain = append(chain, hopOf(id, i == len(path)-1))
 			}
 			r.Chains = append(r.Chains, chain)
@@ -392,8 +417,17 @@ func vulnRowOf(f sdk.Finding) vulnRow {
 	if c := sub(props, "cvss"); len(c) > 0 {
 		r.Score, r.Vector = str(c, "score"), str(c, "vector")
 	}
-	r.Search = strings.ToLower(strings.Join(append([]string{r.ID, r.Package, r.Version, r.Title}, r.Aliases...), " "))
+	terms := append([]string{r.ID, r.Package, r.Version, r.Title}, r.Aliases...)
+	r.Search = strings.ToLower(strings.Join(append(terms, moduleNames(r.Modules)...), " "))
 	return r
+}
+
+func moduleNames(ms []sdk.ModuleRef) []string {
+	out := make([]string, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, m.Name)
+	}
+	return out
 }
 
 func outdatedRowOf(f sdk.Finding) outdatedRow {
@@ -403,11 +437,12 @@ func outdatedRowOf(f sdk.Finding) outdatedRow {
 	r.Package = str(sub(props, "package"), "name")
 	if p := f.PrimaryPackage(); p != nil {
 		r.Direct = p.Direct
+		r.Modules = moduleNames(p.Modules)
 		if r.Package == "" {
 			r.Package = short(p.PURL)
 		}
 	}
-	r.Search = strings.ToLower(r.Package + " " + r.Current + " " + r.Latest)
+	r.Search = strings.ToLower(strings.Join(append([]string{r.Package, r.Current, r.Latest}, r.Modules...), " "))
 	return r
 }
 

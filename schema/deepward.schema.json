@@ -222,6 +222,24 @@
         "targetBranch": {
           "type": "string"
         },
+        "title": {
+          "additionalProperties": false,
+          "properties": {
+            "group": {
+              "type": "string"
+            },
+            "pin": {
+              "type": "string"
+            },
+            "security": {
+              "type": "string"
+            },
+            "update": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
         "transitive": {
           "enum": [
             "upgrade",
@@ -243,6 +261,13 @@
             }
           },
           "type": "object"
+        },
+        "verify": {
+          "enum": [
+            "batch",
+            "each"
+          ],
+          "type": "string"
         }
       },
       "type": "object"

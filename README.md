@@ -47,7 +47,7 @@ Maven, sbt, .NET and Go need their build tools, so copy the binary into an
 image that has them:
 
 ```sh
-docker run --rm -v "$PWD:/src" -w /src ghcr.io/deepward-oss/deepward:0.3.0 scan
+docker run --rm -v "$PWD:/src" -w /src ghcr.io/deepward-oss/deepward:0.4.0 scan
 ```
 
 ```dockerfile
@@ -57,7 +57,7 @@ COPY --from=ghcr.io/deepward-oss/deepward:0.1 /deepward /usr/local/bin/deepward
 With Go 1.26 or later:
 
 ```sh
-go install github.com/deepward-oss/deepward/cmd/deepward@v0.3.0
+go install github.com/deepward-oss/deepward/cmd/deepward@v0.4.0
 ```
 
 Versions follow SemVer; see [docs/versioning.md](docs/versioning.md) and the

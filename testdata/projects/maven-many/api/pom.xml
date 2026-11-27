@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.example.many</groupId>
+    <artifactId>many-parent</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <artifactId>many-api</artifactId>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>2.9.10.1</version>
+    </dependency>
+  </dependencies>
+</project>

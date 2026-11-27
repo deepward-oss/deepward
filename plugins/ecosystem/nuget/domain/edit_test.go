@@ -139,3 +139,58 @@ func TestScanErrorsAndLimits(t *testing.T) {
 		t.Error("lineStart clamp")
 	}
 }
+
+func TestPinTargets(t *testing.T) {
+	plain := "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <ItemGroup>\n    <PackageReference Include=\"Some.Lib\" Version=\"1.0.0\" />\n  </ItemGroup>\n</Project>\n"
+	pin := func(files []File, projects []string, props string, targets []string) map[string]string {
+		t.Helper()
+		edits, m := Plan(files, projects, props, sdk.PackageChange{To: "8.0.5", Pin: true, Targets: targets}, "System.Text.Json")
+		if m != nil {
+			t.Fatal(m)
+		}
+		out := map[string]string{}
+		for _, f := range files {
+			var mine []sdk.TextEdit
+			for _, e := range edits {
+				if e.Path == f.Path {
+					mine = append(mine, e)
+				}
+			}
+			b, err := textedit.Apply(f.Data, mine)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out[f.Path] = string(b)
+		}
+		return out
+	}
+	mods := func() []File {
+		return []File{{Path: "Api/Api.csproj", Data: []byte(plain)}, {Path: "Core/Core.csproj", Data: []byte(plain)}, {Path: "Web/Web.csproj", Data: []byte(plain)}}
+	}
+	projects := []string{"Api/Api.csproj", "Core/Core.csproj", "Web/Web.csproj"}
+	// No CPM: a versioned reference in each entry module only.
+	out := pin(mods(), projects, "", []string{"Core/Core.csproj", "Elsewhere/X.csproj"})
+	if !strings.Contains(out["Core/Core.csproj"], `<PackageReference Include="System.Text.Json" Version="8.0.5" />`) || out["Api/Api.csproj"] != plain || out["Web/Web.csproj"] != plain {
+		t.Errorf("pin in Core only:\n%v", out)
+	}
+	// No usable target: the first project file, as before.
+	out = pin(mods(), projects, "", nil)
+	if !strings.Contains(out["Api/Api.csproj"], "System.Text.Json") || out["Core/Core.csproj"] != plain {
+		t.Errorf("fallback to the first project file:\n%v", out)
+	}
+	// CPM without transitive pinning: PackageVersion plus version-less references in each target.
+	noPinning := strings.Replace(props, "<CentralPackageTransitivePinningEnabled>true", "<CentralPackageTransitivePinningEnabled>false", 1)
+	files := append(mods(), File{Path: "Directory.Packages.props", Data: []byte(noPinning)})
+	out = pin(files, projects, "Directory.Packages.props", []string{"Core/Core.csproj", "Web/Web.csproj"})
+	if !strings.Contains(out["Directory.Packages.props"], `<PackageVersion Include="System.Text.Json" Version="8.0.5" />`) ||
+		!strings.Contains(out["Core/Core.csproj"], `<PackageReference Include="System.Text.Json" />`) ||
+		!strings.Contains(out["Web/Web.csproj"], `<PackageReference Include="System.Text.Json" />`) || out["Api/Api.csproj"] != plain {
+		t.Errorf("CPM without transitive pinning:\n%v", out)
+	}
+	// CPM with transitive pinning: the props file only.
+	files = append(mods(), File{Path: "Directory.Packages.props", Data: []byte(props)})
+	out = pin(files, projects, "Directory.Packages.props", []string{"Core/Core.csproj"})
+	if out["Core/Core.csproj"] != plain || !strings.Contains(out["Directory.Packages.props"], `Include="System.Text.Json" Version="8.0.5"`) {
+		t.Errorf("central transitive pinning:\n%v", out)
+	}
+}

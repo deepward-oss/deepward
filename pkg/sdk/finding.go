@@ -78,6 +78,20 @@ type PackageLocation struct {
 	Paths  [][]string `json:"paths,omitempty"`
 	Direct bool       `json:"direct"`
 	Scope  string     `json:"scope,omitempty"`
+	// Modules are the modules of a multi-module project that reach the
+	// package, sorted by name; empty for projects without modules.
+	Modules []ModuleRef `json:"modules,omitempty"`
+}
+
+// ModuleRef is a module that reaches a package.
+type ModuleRef struct {
+	// ID is the module node ID in the dependency graph (as in Paths).
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Scope is the package scope in this module.
+	Scope string `json:"scope,omitempty"`
+	// Direct is set when the module declares the package itself.
+	Direct bool `json:"direct"`
 }
 
 // Reference is an external link.
@@ -94,6 +108,12 @@ type Remediation struct {
 	TextEdits   []TextEdit     `json:"textEdits,omitempty"`
 	// Group is a hint for grouping remediations into one change request.
 	Group string `json:"group,omitempty"`
+	// Affects lists the packages the change may alter, as package URLs
+	// without version: for a package change, the package and every package
+	// it currently brings in. The fix pipeline verifies changes of different
+	// change requests together only when their Affects do not overlap; an
+	// empty list means the change is verified on its own.
+	Affects []string `json:"affects,omitempty"`
 }
 
 // PackageChange sets a package to a version.
@@ -106,6 +126,11 @@ type PackageChange struct {
 	// instead of changing a declared version.
 	Pin    bool   `json:"pin,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// Targets are the manifests the change should be applied to, for
+	// example the project files of the modules through which a pinned
+	// package enters the project. It is a hint: ecosystems that pin in one
+	// central place ignore it, and empty means the ecosystem decides.
+	Targets []string `json:"targets,omitempty"`
 }
 
 // TextEdit replaces bytes [Start, End) of a file. Expected, if set, must

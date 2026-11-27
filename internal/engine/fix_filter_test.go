@@ -87,8 +87,14 @@ func TestFixConcurrencyKeepsResults(t *testing.T) {
 		return sb.String()
 	}
 	one := summary("fix:\n  concurrency: 1\n")
-	if many := summary("fix:\n  concurrency: 8\n"); many != one {
-		t.Errorf("results depend on concurrency:\n--- 1 ---\n%s\n--- 8 ---\n%s", one, many)
+	for _, mode := range []string{VerifyBatch, VerifyEach} {
+		for _, n := range []string{"1", "8"} {
+			// Without affected packages every group is verified on its own,
+			// so both modes produce the same plan, in the same order.
+			if got := summary("fix:\n  verify: " + mode + "\n  concurrency: " + n + "\n"); got != one {
+				t.Errorf("results depend on mode or concurrency (%s, %s):\n--- default, 1 ---\n%s\n--- got ---\n%s", mode, n, one, got)
+			}
+		}
 	}
 	// A reused copy is restored between groups: no change set carries
 	// another group's edit.
@@ -137,10 +143,16 @@ func TestProgressLogs(t *testing.T) {
 		return buf.String()
 	}
 	out := run("")
-	for _, want := range []string{"projects detected", "analyzer finished", "scan finished", "verifying fixes", "verifying fix group",
-		"verifying change", "change rejected", "change verified", "fix group done", "fixes verified", "duration="} {
+	for _, want := range []string{"projects detected", "analyzer finished", "scan finished", "verifying fixes", "verify=batch", "verifying batch",
+		"verifying change", "change rejected", "change verified", "fix group done", "fixes verified", "graphBuilds=", "duration="} {
 		if !strings.Contains(out, want) {
 			t.Errorf("progress lacks %q:\n%s", want, out)
+		}
+	}
+	each := run("fix:\n  verify: each\n")
+	for _, want := range []string{"verify=each", "verifying fix group", "verifying change", "change rejected", "change verified", "fix group done", "graphBuilds="} {
+		if !strings.Contains(each, want) {
+			t.Errorf("each: progress lacks %q:\n%s", want, each)
 		}
 	}
 	// Verification scans are nested: only the main scan reports itself.
@@ -209,5 +221,25 @@ func TestTransitiveOrder(t *testing.T) {
 	var c Config
 	if err := decodeConfigForTest("fix:\n  transitive: bump\n", &c); err == nil && c.Validate() == nil {
 		t.Error("unknown fix.transitive must be rejected")
+	}
+}
+
+func TestVerifyConfig(t *testing.T) {
+	if got := (FixConfig{}).VerifyMode(); got != VerifyBatch {
+		t.Errorf("default: %s", got)
+	}
+	for _, mode := range []string{VerifyBatch, VerifyEach} {
+		var c Config
+		if err := decodeConfigForTest("fix:\n  verify: "+mode+"\n", &c); err != nil || c.Validate() != nil || c.Fix.VerifyMode() != mode {
+			t.Errorf("%s: %v %v %s", mode, err, c.Validate(), c.Fix.VerifyMode())
+		}
+	}
+	var c Config
+	if err := decodeConfigForTest("fix:\n  verify: all\n", &c); err == nil && c.Validate() == nil {
+		t.Error("unknown fix.verify must be rejected")
+	}
+	c = Config{Fix: FixConfig{Verify: "all"}}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "fix.verify") {
+		t.Errorf("validation: %v", err)
 	}
 }

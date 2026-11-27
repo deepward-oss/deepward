@@ -93,6 +93,12 @@ func TestAnalyze(t *testing.T) {
 	if cats.PrimaryFile().StartLine != 2 || cats.Remediations[0].Package.To != "2.13.0" {
 		t.Errorf("location/remediation: %+v %+v", cats.PrimaryFile(), cats.Remediations)
 	}
+	if got := strings.Join(cats.Remediations[0].Affects, ","); got != "pkg:maven/a/transitive,pkg:maven/org.typelevel/cats-core_2.13" {
+		t.Errorf("an update affects the package and what it brings: %s", got)
+	}
+	if got := strings.Join(byName["com.acme:billing-client"].Remediations[0].Affects, ","); got != "pkg:maven/com.acme/billing-client" {
+		t.Errorf("an update of a leaf affects only the leaf: %s", got)
+	}
 	if _, ok := byName["a:transitive"]; ok {
 		t.Error("only direct dependencies")
 	}
@@ -163,5 +169,46 @@ func TestConfigValidate(t *testing.T) {
 	}
 	if err := (&Config{Rules: []domain.Rule{{Match: "*", MaxUpdate: deps.UpdateMinor, Allow: "<3"}}}).Validate(); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestOutdatedInModules(t *testing.T) {
+	a, req := setup(t, Config{})
+	const cats = "pkg:maven/org.typelevel/cats-core_2.13@2.9.0"
+	mod := func(id, name, manifest string) deps.Node {
+		return deps.Node{ID: id, Name: name, Kind: deps.KindModule, Attributes: map[string]string{"manifest": manifest}}
+	}
+	g, err := deps.NewGraph(root, "t", []deps.Node{
+		mod("module:web/build.sbt", "web", "web/build.sbt"), mod("module:core/build.sbt", "core", "core/build.sbt"),
+		mod("module:app/build.sbt", "app", "app/build.sbt"),
+		{ID: cats, Ecosystem: deps.Maven, Name: "org.typelevel:cats-core_2.13", Version: "2.9.0", Scope: "compile"},
+	}, []deps.Edge{{From: root, To: "module:web/build.sbt"}, {From: root, To: "module:core/build.sbt"}, {From: root, To: "module:app/build.sbt"},
+		{From: "module:web/build.sbt", To: cats}, {From: "module:core/build.sbt", To: cats}, {From: "module:app/build.sbt", To: "module:core/build.sbt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Facts = facts{deps.FactDependencyGraph: g}
+	req.Workspace.FS = fstest.MapFS{"build.sbt": {Data: []byte("cats-core\n")},
+		"core/build.sbt": {Data: []byte("name := \"core\"\nlibraryDependencies += \"org.typelevel\" %% \"cats-core\" % \"2.9.0\"\n")},
+		"web/build.sbt":  {Data: []byte("cats-core\n")}}
+	req.Project.Manifests = []string{"build.sbt", "core/build.sbt", "web/build.sbt"}
+	found, err := a.Analyze(context.Background(), req)
+	if err != nil || len(found) != 1 {
+		t.Fatalf("one finding for the dependency: %v %+v", err, found)
+	}
+	loc := found[0].Locations[0]
+	var names []string
+	for _, m := range loc.Package.Modules {
+		names = append(names, m.Name)
+		if !m.Direct || m.Scope != "compile" {
+			t.Errorf("declaring module: %+v", m)
+		}
+	}
+	// app reaches cats only through core and does not declare it.
+	if strings.Join(names, ",") != "core,web" {
+		t.Errorf("declaring modules: %v", names)
+	}
+	if loc.File.Path != "core/build.sbt" || loc.File.StartLine != 2 {
+		t.Errorf("located in the first declaring module: %+v", loc.File)
 	}
 }

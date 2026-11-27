@@ -28,8 +28,9 @@ type scratch struct {
 	state map[string][]byte
 	// touched lists the files changed since the copy was made or reset.
 	touched map[string]bool
-	// cache holds verification scans by project, file contents and analyzers.
-	cache map[string]*sdk.ScanResult
+	// cache holds verification scans by project, file contents and
+	// analyzers; the copies of one fix run share it.
+	cache *verifyMemo
 }
 
 // fileState is a file's content before a change, for rollback.
@@ -47,7 +48,7 @@ func (e *Engine) newScratch(p sdk.Project) (*scratch, error) {
 		return nil, err
 	}
 	sc := &scratch{ws: sdk.NewWorkspace(dir, e.ws.Exclude), original: map[string][]byte{}, state: map[string][]byte{},
-		touched: map[string]bool{}, cache: map[string]*sdk.ScanResult{}}
+		touched: map[string]bool{}, cache: newVerifyMemo()}
 	copyFile := func(rel string) error {
 		data, err := fs.ReadFile(e.ws.FS, rel)
 		if err != nil {

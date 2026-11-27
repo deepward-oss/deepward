@@ -71,7 +71,7 @@ func TestPostTasks(t *testing.T) {
 	for _, f := range cs.Files {
 		files[f.Path] = f
 	}
-	// The task ran after 1.5 (rejected, rolled back) and after 2.0.
+	// The task ran once, after verification rejected 1.5 and accepted 2.0.
 	if got := string(files["app/generated.txt"].Content); got != "generated from\nlib=2.0\n" {
 		t.Errorf("generated file follows the verified change: %q", got)
 	}
@@ -87,9 +87,12 @@ func TestPostTasks(t *testing.T) {
 	if len(cs.Files) != 3 || !strings.Contains(cs.Diff, "+generated from") {
 		t.Errorf("files: %v\n%s", cs.Files, cs.Diff)
 	}
-	if len(tool.Invocations) != 2 || strings.Join(tool.Invocations[0].Args, " ") != "--all" ||
+	if len(tool.Invocations) != 1 || strings.Join(tool.Invocations[0].Args, " ") != "--all" ||
 		tool.Invocations[0].Dir != filepath.Join(filepath.Dir(tool.Invocations[0].Dir), "app") {
-		t.Errorf("only the maven task runs, in the project directory, once per alternative: %+v", tool.Invocations)
+		t.Errorf("only the maven task runs, in the project directory, once per change request: %+v", tool.Invocations)
+	}
+	if strings.Join(cs.Items[0].Tasks, ",") != "gen --all" {
+		t.Errorf("items list the tasks: %v", cs.Items[0].Tasks)
 	}
 	body := Body(cs)
 	if !strings.Contains(body, "### Post tasks") || !strings.Contains(body, "`gen --all`") {
@@ -100,15 +103,60 @@ func TestPostTasks(t *testing.T) {
 	}
 }
 
-func TestFailingPostTaskRejectsTheChange(t *testing.T) {
+func TestPostTasksOncePerChangeRequest(t *testing.T) {
+	for _, mode := range []string{VerifyBatch, VerifyEach} {
+		tool := gen()
+		e := engineWithTools(t, fixWorkspace(t, "lib=1.0\nother=1.0\nboth=1.0\n"), `fix:
+  verify: `+mode+`
+  groups:
+    - name: all-g
+      match: ["pkg:maven/g/*"]
+  postTasks:
+    - tool: gen
+      files: ["app/*.txt"]
+`, tool)
+		plan := planFor(t, e)
+		if len(plan.ChangeSets) != 1 || len(plan.ChangeSets[0].Items) != 3 {
+			t.Fatalf("%s: plan: %+v failed=%+v", mode, plan.ChangeSets, plan.Failed)
+		}
+		if len(tool.Invocations) != 1 {
+			t.Errorf("%s: one run for three changes, got %d", mode, len(tool.Invocations))
+		}
+		var generated string
+		for _, f := range plan.ChangeSets[0].Files {
+			if f.Path == "app/generated.txt" {
+				generated = string(f.Content)
+			}
+		}
+		if generated != "generated from\nlib=2.0\nother=1.1\nboth=1.9\n" {
+			t.Errorf("%s: the task sees the three verified changes: %q", mode, generated)
+		}
+	}
+}
+
+func TestFailingPostTaskDropsTheChangeRequest(t *testing.T) {
 	bad := &sdktest.FakeTool{ToolName: "bad", RunFunc: func(_ context.Context, spec sdk.RunSpec) (sdk.RunResult, error) {
+		if data, _ := os.ReadFile(filepath.Join(spec.Dir, "versions.txt")); !strings.Contains(string(data), "lib=2.0") {
+			return sdk.RunResult{}, nil
+		}
 		_ = os.WriteFile(filepath.Join(spec.Dir, "half.txt"), []byte("partial"), 0o644)
 		return sdk.RunResult{Tail: []string{"generator exploded"}}, errors.New("exit status 1")
 	}}
-	plan := planFor(t, engineWithTools(t, fixWorkspace(t, "lib=1.0\n"), "fix:\n  postTasks:\n    - tool: bad\n", bad))
-	if len(plan.ChangeSets) != 0 || len(plan.Failed) != 1 ||
-		!strings.Contains(plan.Failed[0].Reason, "post task bad failed: exit status 1: generator exploded") {
-		t.Errorf("plan: %+v failed=%+v", plan.ChangeSets, plan.Failed)
+	for _, mode := range []string{VerifyBatch, VerifyEach} {
+		bad.Invocations = nil
+		plan := planFor(t, engineWithTools(t, fixWorkspace(t, "lib=1.0\nother=1.0\n"), "fix:\n  verify: "+mode+"\n  postTasks:\n    - tool: bad\n", bad))
+		if len(plan.ChangeSets) != 1 || !strings.HasSuffix(plan.ChangeSets[0].Branch, "updates-other") || len(plan.Failed) != 1 ||
+			plan.Failed[0].Reason != "post task bad failed: exit status 1: generator exploded" || plan.Failed[0].Group != "security/g:lib" {
+			t.Errorf("%s: only the lib request is dropped: %+v failed=%+v", mode, plan.ChangeSets, plan.Failed)
+		}
+		if len(bad.Invocations) != 2 {
+			t.Errorf("%s: no other alternative is tried after a failing task: %d runs", mode, len(bad.Invocations))
+		}
+		for _, cs := range plan.ChangeSets {
+			if strings.Contains(cs.Diff, "half.txt") {
+				t.Errorf("%s: a failed task's leftovers are undone:\n%s", mode, cs.Diff)
+			}
+		}
 	}
 	missing := planFor(t, engineWithTools(t, fixWorkspace(t, "lib=1.0\n"), "fix:\n  postTasks:\n    - tool: nowhere\n"))
 	if len(missing.Failed) != 1 || !strings.Contains(missing.Failed[0].Reason, "post task nowhere") {
@@ -129,7 +177,23 @@ func planFor(t *testing.T, e *Engine) *FixPlan {
 	return plan
 }
 
+// withMode adds fix.verify to a configuration.
+func withMode(cfg, mode string) string {
+	if strings.Contains(cfg, "fix:\n") {
+		return strings.Replace(cfg, "fix:\n", "fix:\n  verify: "+mode+"\n", 1)
+	}
+	return cfg + "fix:\n  verify: " + mode + "\n"
+}
+
 func TestUnverifiedChanges(t *testing.T) {
+	for _, mode := range []string{VerifyBatch, VerifyEach} {
+		t.Run(mode, func(t *testing.T) {
+			testUnverifiedChanges(t, func(t *testing.T, content, cfg string) *FixPlan { return planWith(t, content, withMode(cfg, mode)) })
+		})
+	}
+}
+
+func testUnverifiedChanges(t *testing.T, planWith func(*testing.T, string, string) *FixPlan) {
 	content := "broken=1.0\nunrelated=1.0\n"
 	// By default a change after which the finding is still reported is a failure.
 	plain := planWith(t, content, "")

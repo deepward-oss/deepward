@@ -220,3 +220,39 @@ func TestHelpersForLayout(t *testing.T) {
 		t.Errorf("hopOf: %+v", h)
 	}
 }
+
+func TestModulesInReport(t *testing.T) {
+	res := sdktest.SampleResult()
+	for i := range res.Findings {
+		f := &res.Findings[i]
+		p := f.PrimaryPackage()
+		switch {
+		case f.Rule == "CVE-2020-36518":
+			p.Modules = []sdk.ModuleRef{{ID: "module:api/pom.xml", Name: "wr-history-api", Scope: "runtime"},
+				{ID: "module:app/pom.xml", Name: "wr-history-app", Scope: "runtime"}}
+			p.Paths = [][]string{{"module:api/pom.xml", "pkg:maven/org.springframework.boot/spring-boot-starter-web@2.5.0", p.PURL},
+				{"module:app/pom.xml", "module:unknown", p.PURL}}
+		case f.Kind == sdk.KindOutdated:
+			p.Modules = []sdk.ModuleRef{{ID: "module:core/pom.xml", Name: "billing-core", Scope: "compile", Direct: true}}
+		}
+	}
+	out := render(t, res)
+	for _, want := range []string{
+		`<dt>modules</dt>`, `<span class="mod">wr-history-api</span> <span class="faint">(runtime)</span>`,
+		`<li><span class="mod">wr-history-api</span><span class="sep">→</span><span class="hop">org.springframework.boot:spring-boot-starter-web`,
+		`<span class="mod">unknown</span>`, "direct · billing-core", "wr-history-app",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report lacks %q", want)
+		}
+	}
+	if !regexp.MustCompile(`data-search="[^"]*jackson-databind[^"]*wr-history-api`).MatchString(out) {
+		t.Error("module names are searchable")
+	}
+	if !regexp.MustCompile(`data-search="org.yaml:snakeyaml[^"]*billing-core"`).MatchString(out) {
+		t.Error("declaring modules of outdated dependencies are searchable")
+	}
+	if strings.Contains(render(t, sdktest.SampleResult()), "<dt>modules</dt>") {
+		t.Error("a result without modules renders no module details")
+	}
+}

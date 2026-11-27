@@ -12,11 +12,12 @@ import (
 	"github.com/deepward-oss/deepward/pkg/sdk"
 )
 
-// PostTask is a command run in the copy of a project after each change is
-// applied and before it is verified, like Renovate's postUpgradeTasks: it can
-// regenerate files that depend on dependency versions (lockfiles, generated
-// code, checksums). Its changes to files matching Files go into the change
-// request; other changes are discarded.
+// PostTask is a command run once per change request, like Renovate's
+// postUpgradeTasks: after the request's changes are verified, in a copy of
+// the project that holds only them, and before they are committed. It can
+// regenerate files that depend on dependency versions (generated code,
+// checksums). Its changes to files matching Files go into the change
+// request's commit; other changes are discarded.
 type PostTask struct {
 	// Tool is resolved by the toolchain like setup steps (mvn, npm, make, ...).
 	Tool string            `yaml:"tool"`
@@ -95,7 +96,8 @@ func compileGlobs(patterns []string) ([]*regexp.Regexp, error) {
 }
 
 // runPostTasks runs the post tasks that apply to the project in its copy
-// and keeps their changes in prev for rollback. It returns the commands run.
+// and records the previous state of the files they change in prev (if not
+// nil). It returns the commands run.
 func (e *Engine) runPostTasks(ctx context.Context, sc *scratch, p sdk.Project, prev snapshot) ([]string, error) {
 	var ran []string
 	for _, t := range e.cfg.Fix.PostTasks {

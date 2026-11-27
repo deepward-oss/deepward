@@ -109,6 +109,14 @@ func TestAncestorUpgradeFromPublishedDependencies(t *testing.T) {
 	if got := remediationTargets(l); got != "org.apache.kafka/kafka-clients 4.5.0, at.yawk.lz4/lz4-java 1.11.4 (pin)" {
 		t.Errorf("remediations: %s", got)
 	}
+	// The upgrade of the parent affects it and what it brings; the pin of
+	// the leaf affects only the leaf.
+	if got := strings.Join(l.Remediations[0].Affects, ","); got != "pkg:maven/at.yawk.lz4/lz4-java,pkg:maven/org.apache.kafka/kafka-clients" {
+		t.Errorf("upgrade affects: %s", got)
+	}
+	if got := strings.Join(l.Remediations[1].Affects, ","); got != "pkg:maven/at.yawk.lz4/lz4-java" {
+		t.Errorf("pin affects: %s", got)
+	}
 	rec := l.Properties["recommendation"].(string)
 	if !strings.HasPrefix(rec, "upgrade org.apache.kafka:kafka-clients from 4.4.0 to 4.5.0: it brings at.yawk.lz4:lz4-java 1.11.4") {
 		t.Errorf("recommendation: %s", rec)
@@ -167,6 +175,15 @@ func TestAncestorUpgradeOutcomes(t *testing.T) {
 			l := byRule(found)["CVE-LZ4-1"]
 			if got := remediationTargets(l); got != c.targets {
 				t.Errorf("remediations: %s", got)
+			}
+			for _, r := range l.Remediations {
+				want := "pkg:maven/at.yawk.lz4/lz4-java"
+				if !r.Package.Pin {
+					want += ",pkg:maven/org.apache.kafka/kafka-clients"
+				}
+				if got := strings.Join(r.Affects, ","); got != want {
+					t.Errorf("%s affects %s", r.Description, got)
+				}
 			}
 			if rec := l.Properties["recommendation"].(string); !strings.Contains(rec, c.rec) {
 				t.Errorf("recommendation: %s", rec)

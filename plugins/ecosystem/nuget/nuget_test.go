@@ -3,10 +3,12 @@ package nuget
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,34 +20,95 @@ import (
 	"github.com/deepward-oss/deepward/pkg/sdk/sdktest"
 )
 
-func TestDetect(t *testing.T) {
-	ws := &sdk.Workspace{Root: "/repo", FS: fstest.MapFS{
-		"Directory.Packages.props":      {Data: []byte("<Project/>")},
-		"client/App.csproj":             {Data: []byte("<Project/>")},
-		"client/packages.lock.json":     {Data: []byte("{}")},
-		"client/NuGet.Config":           {Data: []byte("<configuration/>")},
-		"tools/A.fsproj":                {Data: []byte("<Project/>")},
-		"tools/B.vbproj":                {Data: []byte("<Project/>")},
-		"tools/obj/project.assets.json": {Data: []byte("{}")},
-		"App.sln":                       {Data: []byte("")},
-		"other/packages.lock.json":      {Data: []byte("{}")},
-	}}
+func sln(paths ...string) []byte {
+	out := "Microsoft Visual Studio Solution File, Format Version 12.00\r\n"
+	for _, p := range paths {
+		out += "Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"X\", \"" + p + "\", \"{1}\"\r\nEndProject\r\n"
+	}
+	return []byte(out)
+}
+
+func detect(t *testing.T, files fstest.MapFS) []sdk.Project {
+	t.Helper()
+	ws := &sdk.Workspace{Root: "/repo", FS: files}
 	p := New()
 	sdktest.TestEcosystem(t, p, ws)
-	projects, _ := p.Detect(context.Background(), ws)
-	if len(projects) != 2 || projects[0].ID != "nuget:client" || projects[1].ID != "nuget:tools" {
-		t.Fatalf("projects: %+v", projects)
+	projects, err := p.Detect(context.Background(), ws)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := strings.Join(projects[0].Manifests, ","); got != "client/App.csproj,client/NuGet.Config,client/packages.lock.json,Directory.Packages.props" {
+	return projects
+}
+
+func TestDetectCPMRoot(t *testing.T) {
+	projects := detect(t, fstest.MapFS{
+		"Directory.Packages.props":                 {Data: []byte("<Project/>")},
+		"src/Web/Web.csproj":                       {Data: []byte("<Project/>")},
+		"src/Web/packages.lock.json":               {Data: []byte("{}")},
+		"src/Core/Core.csproj":                     {Data: []byte("<Project/>")},
+		"tests/Core.Tests/Core.Tests.csproj":       {Data: []byte("<Project/>")},
+		"tests/Core.Tests/obj/project.assets.json": {Data: []byte("{}")},
+		"App.sln":      {Data: sln("src\\Web\\Web.csproj", "src\\Core\\Core.csproj")},
+		"All.slnx":     {Data: []byte("<Solution><Project Path=\"src/Core/Core.csproj\" /><Project Path=\"missing/M.csproj\" /></Solution>")},
+		"NuGet.Config": {Data: []byte("<configuration/>")},
+	})
+	if len(projects) != 1 || projects[0].ID != "nuget:." {
+		t.Fatalf("one CPM project: %+v", projects)
+	}
+	pr := projects[0]
+	if got := pr.Attributes["projectFiles"]; got != "src/Core/Core.csproj,src/Web/Web.csproj,tests/Core.Tests/Core.Tests.csproj" {
+		t.Errorf("project files: %s", got)
+	}
+	// App.sln lists only members; All.slnx lists a missing project.
+	if got := pr.Attributes["solutions"]; got != "App.sln" {
+		t.Errorf("solutions to restore: %q", got)
+	}
+	if got := strings.Join(pr.Manifests, ","); got != "src/Core/Core.csproj,src/Web/Web.csproj,tests/Core.Tests/Core.Tests.csproj,src/Web/packages.lock.json,Directory.Packages.props,NuGet.Config" {
 		t.Errorf("manifests: %s", got)
-	}
-	if projects[1].Attributes["projectFiles"] != "tools/A.fsproj,tools/B.vbproj" {
-		t.Errorf("project files: %+v", projects[1].Attributes)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := p.Detect(ctx, ws); err == nil {
+	if _, err := New().Detect(ctx, &sdk.Workspace{Root: "/repo", FS: fstest.MapFS{}}); err == nil {
 		t.Error("cancelled")
+	}
+}
+
+func TestDetectSolutions(t *testing.T) {
+	projects := detect(t, fstest.MapFS{
+		"App.sln":              {Data: sln("Web\\Web.csproj", "Core\\Core.csproj")},
+		"Web/Web.csproj":       {Data: []byte("<Project/>")},
+		"Core/Core.csproj":     {Data: []byte("<Project/>")},
+		"tools/Tools.sln":      {Data: sln("Cli\\Cli.csproj", "..\\Core\\Core.csproj")},
+		"tools/Cli/Cli.csproj": {Data: []byte("<Project/>")},
+		"legacy/Old.csproj":    {Data: []byte("<Project/>")},
+		"legacy/global.json":   {Data: []byte("{}")},
+	})
+	var ids []string
+	for _, p := range projects {
+		ids = append(ids, p.ID+"="+p.Attributes["projectFiles"]+"|"+p.Attributes["solutions"])
+	}
+	// Core is in App.sln and tools/Tools.sln; only App.sln is at or above it.
+	want := "nuget:.=Core/Core.csproj,Web/Web.csproj|App.sln;nuget:legacy=legacy/Old.csproj|;nuget:tools=tools/Cli/Cli.csproj|"
+	if got := strings.Join(ids, ";"); got != want {
+		t.Errorf("projects:\n got  %s\n want %s", got, want)
+	}
+	if got := strings.Join(projects[0].Manifests, ","); got != "Core/Core.csproj,Web/Web.csproj,App.sln" {
+		t.Errorf("solution manifests: %s", got)
+	}
+	if got := strings.Join(projects[1].Manifests, ","); got != "legacy/Old.csproj,legacy/global.json" {
+		t.Errorf("legacy manifests: %s", got)
+	}
+}
+
+func TestNearestSolutionTies(t *testing.T) {
+	if got, ok := nearestSolution("a/b", []string{"a/Z.sln", "a/A.sln", "B.sln"}); !ok || got != "a/A.sln" {
+		t.Errorf("deepest, then first by path: %q", got)
+	}
+	if _, ok := nearestSolution("a", []string{"b/X.sln"}); ok {
+		t.Error("a solution beside the project file does not bound it")
+	}
+	if got, ok := nearestSolution("a", []string{"Root.sln"}); !ok || got != "Root.sln" {
+		t.Errorf("root solution: %q", got)
 	}
 }
 
@@ -154,15 +217,38 @@ func TestProduceFailures(t *testing.T) {
 	if _, err := p.Produce(context.Background(), sdk.FactRequest{Name: "x"}); err == nil {
 		t.Error("unknown fact")
 	}
-	unreadable := &sdktest.FakeTool{ToolName: "dotnet", RunFunc: func(_ context.Context, spec sdk.RunSpec) (sdk.RunResult, error) {
+	// MSBuild names a path that does not exist: the project file is restored
+	// on its own once more, and still nothing is found.
+	missing := &sdktest.FakeTool{ToolName: "dotnet", RunFunc: func(_ context.Context, spec sdk.RunSpec) (sdk.RunResult, error) {
 		if spec.Args[0] == "msbuild" {
 			return sdk.RunResult{Stdout: []byte("/nonexistent/project.assets.json")}, nil
 		}
 		return sdk.RunResult{}, nil
 	}}
+	p, req = setup(t, missing)
+	if _, err := p.Produce(context.Background(), req); err == nil || !strings.Contains(err.Error(), "project.assets.json not found") {
+		t.Errorf("missing custom assets: %v", err)
+	}
+	restores := 0
+	for _, inv := range missing.Invocations {
+		if inv.Args[0] == "restore" {
+			restores++
+		}
+	}
+	if restores != 2 {
+		t.Errorf("restore, then a fallback restore: %d", restores)
+	}
+	// MSBuild names a directory: it exists but cannot be read as assets.
+	dir := t.TempDir()
+	unreadable := &sdktest.FakeTool{ToolName: "dotnet", RunFunc: func(_ context.Context, spec sdk.RunSpec) (sdk.RunResult, error) {
+		if spec.Args[0] == "msbuild" {
+			return sdk.RunResult{Stdout: []byte(dir)}, nil
+		}
+		return sdk.RunResult{}, nil
+	}}
 	p, req = setup(t, unreadable)
-	if _, err := p.Produce(context.Background(), req); err == nil || !strings.Contains(err.Error(), "read /nonexistent") {
-		t.Errorf("unreadable assets: %v", err)
+	if _, err := p.Produce(context.Background(), req); err == nil {
+		t.Error("unreadable assets")
 	}
 }
 
@@ -278,5 +364,128 @@ func TestFeeds(t *testing.T) {
 	}
 	if New().getenv("PATH") == "" && os.Getenv("PATH") != "" {
 		t.Error("getenv")
+	}
+}
+
+// restoreAll is a fake dotnet that writes assets for every given member on
+// any restore and records the restore targets.
+func restoreAll(root string, assets []byte, members []string, targets *[]string) *sdktest.FakeTool {
+	return &sdktest.FakeTool{ToolName: "dotnet", ToolVersion: "8.0.404", RunFunc: func(_ context.Context, spec sdk.RunSpec) (sdk.RunResult, error) {
+		if spec.Args[0] == "restore" {
+			rel, _ := filepath.Rel(root, spec.Args[1])
+			*targets = append(*targets, filepath.ToSlash(rel))
+			for _, m := range members {
+				obj := filepath.Join(root, filepath.Dir(filepath.FromSlash(m)), "obj")
+				_ = os.MkdirAll(obj, 0o755)
+				_ = os.WriteFile(filepath.Join(obj, "project.assets.json"), assets, 0o600)
+			}
+		}
+		return sdk.RunResult{}, nil
+	}}
+}
+
+func TestProduceRestoresOncePerSolution(t *testing.T) {
+	run := func(files map[string]string, attrs map[string]string) []string {
+		root := t.TempDir()
+		var members []string
+		for rel, content := range files {
+			_ = os.MkdirAll(filepath.Join(root, filepath.Dir(filepath.FromSlash(rel))), 0o755)
+			_ = os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(content), 0o644)
+			if strings.HasSuffix(rel, "proj") {
+				members = append(members, rel)
+			}
+		}
+		sort.Strings(members)
+		var targets []string
+		p := New()
+		_ = p.Init(context.Background(), &sdktest.FakeHost{ToolSet: &sdktest.FakeTools{Tools: map[string]*sdktest.FakeTool{
+			"dotnet": restoreAll(root, fixture(t), members, &targets)}}})
+		attrs["projectFiles"] = strings.Join(members, ",")
+		project := sdk.Project{ID: "nuget:.", Ecosystem: ID, Dir: ".", Manifests: members, Attributes: attrs}
+		if _, err := p.Produce(context.Background(), sdk.FactRequest{Name: deps.FactDependencyGraph, Project: project,
+			Workspace: sdk.NewWorkspace(root, nil)}); err != nil {
+			t.Fatal(err)
+		}
+		return targets
+	}
+	files := map[string]string{}
+	var listed []string
+	for i := 0; i < 30; i++ {
+		rel := fmt.Sprintf("src/P%02d/P%02d.csproj", i, i)
+		files[rel] = "<Project/>"
+		listed = append(listed, strings.ReplaceAll(rel, "/", "\\"))
+	}
+	files["App.sln"] = string(sln(listed...))
+	if got := run(files, map[string]string{"solutions": "App.sln"}); strings.Join(got, ",") != "App.sln" {
+		t.Errorf("thirty projects, one restore: %v", got)
+	}
+	cpm := map[string]string{
+		"Web/Web.csproj":       `<Project><ItemGroup><ProjectReference Include="..\Core\Core.csproj" /></ItemGroup></Project>`,
+		"Core/Core.csproj":     "<Project/>",
+		"Worker/Worker.csproj": "<Project/>",
+	}
+	if got := run(cpm, map[string]string{}); strings.Join(got, ",") != "Web/Web.csproj,Worker/Worker.csproj" {
+		t.Errorf("only unreferenced members are restored: %v", got)
+	}
+	cycle := map[string]string{
+		"A/A.csproj": `<Project><ItemGroup><ProjectReference Include="..\B\B.csproj" /></ItemGroup></Project>`,
+		"B/B.csproj": `<Project><ItemGroup><ProjectReference Include="..\A\A.csproj" /></ItemGroup></Project>`,
+	}
+	if got := run(cycle, map[string]string{}); strings.Join(got, ",") != "A/A.csproj,B/B.csproj" {
+		t.Errorf("a reference cycle restores every member: %v", got)
+	}
+}
+
+func TestProduceRestoresSkippedProjectFiles(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{"Web/Web.csproj", "Tools/Tools.csproj"} {
+		_ = os.MkdirAll(filepath.Join(root, filepath.Dir(filepath.FromSlash(rel))), 0o755)
+		_ = os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte("<Project/>"), 0o644)
+	}
+	_ = os.WriteFile(filepath.Join(root, "App.sln"), sln("Web\\Web.csproj", "Tools\\Tools.csproj"), 0o644)
+	assets := fixture(t)
+	var targets []string
+	failTools := false
+	// The solution restore builds only Web (Tools has no configuration
+	// mapping); a project file restore writes its own assets.
+	tool := &sdktest.FakeTool{ToolName: "dotnet", ToolVersion: "8.0.404", RunFunc: func(_ context.Context, spec sdk.RunSpec) (sdk.RunResult, error) {
+		if spec.Args[0] != "restore" {
+			return sdk.RunResult{}, nil
+		}
+		rel, _ := filepath.Rel(root, spec.Args[1])
+		rel = filepath.ToSlash(rel)
+		targets = append(targets, rel)
+		dir := filepath.Dir(rel)
+		if rel == "App.sln" {
+			dir = "Web"
+		} else if failTools {
+			return sdk.RunResult{}, &sdk.ExitError{Tool: "dotnet", ExitCode: 1}
+		}
+		obj := filepath.Join(root, filepath.FromSlash(dir), "obj")
+		_ = os.MkdirAll(obj, 0o755)
+		return sdk.RunResult{}, os.WriteFile(filepath.Join(obj, "project.assets.json"), assets, 0o600)
+	}}
+	p := New()
+	_ = p.Init(context.Background(), &sdktest.FakeHost{ToolSet: &sdktest.FakeTools{Tools: map[string]*sdktest.FakeTool{"dotnet": tool}}})
+	members := []string{"Tools/Tools.csproj", "Web/Web.csproj"}
+	req := sdk.FactRequest{Name: deps.FactDependencyGraph, Workspace: sdk.NewWorkspace(root, nil), Project: sdk.Project{
+		ID: "nuget:.", Ecosystem: ID, Dir: ".", Manifests: members,
+		Attributes: map[string]string{"projectFiles": strings.Join(members, ","), "solutions": "App.sln"}}}
+	g, err := p.Produce(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(targets, ",") != "App.sln,Tools/Tools.csproj" {
+		t.Errorf("solution, then the skipped project file: %v", targets)
+	}
+	if mods := g.(*deps.Graph).Modules(); len(mods) != 2 {
+		t.Errorf("both members are modules: %v", mods)
+	}
+	_ = os.RemoveAll(filepath.Join(root, "Tools", "obj"))
+	_ = os.RemoveAll(filepath.Join(root, "Web", "obj"))
+	failTools = true
+	var xe *sdk.ExitError
+	if _, err := p.Produce(context.Background(), req); !errors.As(err, &xe) {
+		t.Errorf("failed fallback restore: %v", err)
 	}
 }

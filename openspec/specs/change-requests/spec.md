@@ -65,7 +65,7 @@ Before publishing, the system SHALL rebuild the project's graph on the edited fi
 - **THEN** the change is not published and is marked `verification-failed`
 
 ### Requirement: Post tasks
-The system SHALL run the `fix.postTasks` that apply to a project (`ecosystems` and `projects` filters) in its copy after each change is applied and before it is verified, resolving each `tool` through the toolchain and running it in `dir` relative to the project directory with `args` and `env`. Changes the task makes to files matching `files` (globs relative to the repository root, `**` for any number of directories; every file outside excluded directories when empty), including new and deleted files, SHALL become part of the change; other changes SHALL be undone. A task that fails SHALL reject the change with the command and the last line of its output as the reason, and its changes SHALL be undone. The change request SHALL list the tasks that ran.
+The system SHALL run the `fix.postTasks` that apply to a project (`ecosystems` and `projects` filters) once per change request, after its changes are verified and before they are committed and the request is assembled, in a copy of the project that holds only that request's changes, resolving each `tool` through the toolchain and running it in `dir` relative to the project directory with `args` and `env`. Post tasks SHALL not run before verification. Changes the task makes to files matching `files` (globs relative to the repository root, `**` for any number of directories; every file outside excluded directories when empty), including new and deleted files, SHALL become part of the commit of the change request; other changes SHALL be undone. A task that fails SHALL drop the change request, which is reported as failed with the command and the last line of its output as the reason, and no other alternative is tried for it. The change request SHALL list the tasks that ran.
 
 #### Scenario: Regenerated file joins the change
 - **WHEN** a post task regenerates `app/generated.txt` from the edited versions, writes a log file and `files` is `["app/*.txt"]`
@@ -73,7 +73,11 @@ The system SHALL run the `fix.postTasks` that apply to a project (`ecosystems` a
 
 #### Scenario: Failing post task
 - **WHEN** a post task exits with an error
-- **THEN** the change is rejected with `post task <command> failed` and the last output line, and no file it wrote remains in the copy
+- **THEN** no change request is created for that group, it is reported as failed with `post task <command> failed` and the last output line, and other groups are not affected
+
+#### Scenario: Once per change request
+- **WHEN** a change request carries three verified changes and one post task applies
+- **THEN** the task runs once, after verification and before the commit, with the three changes applied and no change of another request, and the files it regenerated are in the same commit as the three changes
 
 ### Requirement: Unverified changes
 When verification finds the targeted findings still reported but the project still builds, the system SHALL log a warning with the reason and list the change as `verification-failed`, unless `fix.unverified.publish` is true. Then it SHALL publish the first such alternative in the order of preference (`fix.transitive`) in a change request titled `Deepward: [unverified] …`, labeled with `fix.unverified.labels` (default `deepward-unverified`), whose description starts with a warning that the fix is not confirmed, gives the reason for each unverified change and a command to inspect where the package comes from, and lists the advisories as targeted rather than fixed. Changes that break the build or whose post tasks fail SHALL never be published.
@@ -87,7 +91,7 @@ When verification finds the targeted findings still reported but the project sti
 - **THEN** no change request is created for the change, the summary lists it as a verification failure and says how to publish it as unverified
 
 ### Requirement: Parallel verification
-The system SHALL verify change groups with `fix.concurrency` workers (default 2). Each worker SHALL copy a project once, reuse the copy for every group of that project it verifies and restore the edited files between groups. The resulting plan SHALL not depend on the number of workers.
+The system SHALL verify with `fix.concurrency` workers (default 2), which take batches (with `fix.verify: batch`) or change groups (with `fix.verify: each`). Each worker SHALL copy a project once, reuse the copy for everything of that project it verifies and restore the edited files in between. The resulting plan SHALL not depend on the number of workers.
 
 #### Scenario: Same plan with any concurrency
 - **WHEN** the same workspace is fixed with `fix.concurrency` 1 and 8
@@ -229,3 +233,151 @@ When an open bot request is no longer planned because all its changes are now pa
 #### Scenario: Grouping switched to project
 - **WHEN** `deepward/maven/app/updates-other` is open and the grouping changes to `project`
 - **THEN** the old request is closed with a comment saying its changes are now part of the project's request
+
+### Requirement: Title patterns per kind of change request
+The system SHALL take a change request's title from `fix.title`, which holds one pattern per kind: `security` (a vulnerability fixed by one package change), `pin` (a vulnerability fixed by pinning a transitive version; falls back to `security`), `update` (one outdated dependency) and `group` (several package changes in one request). A kind without a pattern SHALL keep Deepward's default title.
+
+#### Scenario: Conventional Commits titles
+- **WHEN** `fix.title.security` is `fix(deps): bump {name} from {from} to {to}` and a request upgrades `org.apache.kafka:kafka-clients` 4.4.0 → 4.5.0 in a root project
+- **THEN** its title is `fix(deps): bump kafka-clients from 4.4.0 to 4.5.0`
+
+#### Scenario: Pin falls back to security
+- **WHEN** only `fix.title.security` is set and a request pins `org.apache.zookeeper:zookeeper` to 3.9.5
+- **THEN** its title is rendered from the `security` pattern
+
+#### Scenario: Pin pattern
+- **WHEN** `fix.title.pin` is `fix(deps): pin {name} to {to}` and a request pins `zookeeper` to 3.9.5
+- **THEN** its title is `fix(deps): pin zookeeper to 3.9.5`
+
+#### Scenario: Kind without a pattern
+- **WHEN** only `fix.title.update` is set and a request fixes a vulnerability
+- **THEN** the vulnerability request keeps the default title, for example `Deepward: fix vulnerabilities: lz4-java 1.11.2 → 1.11.4`
+
+### Requirement: Title placeholders
+Title patterns SHALL support `{package}` (full package name), `{name}` (short name: the part after the last `:` or `/`), `{from}` and `{to}` (versions), `{count}` (number of package changes), `{severity}` (highest severity of the fixed findings), `{project}` (project directory, empty at the repository root), `{ecosystem}`, `{group}` (group name) and `{update}` (patch, minor or major). Patterns SHALL NOT support conditions or loops.
+
+#### Scenario: Group request
+- **WHEN** `fix.title.group` is `chore(deps): update {group} ({count} packages)` and the `jackson` group rule collects three package changes
+- **THEN** the title is `chore(deps): update jackson (3 packages)`
+
+#### Scenario: Placeholders without a value
+- **WHEN** a `group` pattern uses `{from}` and `{to}`
+- **THEN** they render empty, and the surrounding whitespace is collapsed
+
+### Requirement: Empty project in titles
+When `{project}` is empty, the system SHALL remove it together with brackets left empty around it and a preposition directly before it (`in`, `for`, `at`), and SHALL collapse repeated spaces.
+
+#### Scenario: Scope in brackets at the root
+- **WHEN** the pattern is `fix({project}): {name} {from} → {to}` and the project is at the repository root
+- **THEN** the title is `fix: kafka-clients 4.4.0 → 4.5.0`
+
+#### Scenario: Preposition at the root
+- **WHEN** the pattern is `Update {name} {from} → {to} in {project}` and the project is at the repository root
+- **THEN** the title is `Update grpc-stub 1.85.1 → 1.86.0`
+
+#### Scenario: Project outside the root
+- **WHEN** the same pattern is used for a project in `services/api`
+- **THEN** the title is `Update grpc-stub 1.85.1 → 1.86.0 in services/api`
+
+### Requirement: Markers in custom titles
+Whatever the pattern, the system SHALL put `[unverified] ` in front of the title of a request with unverified changes and append ` (not built)` to the title of a request whose findings are all in packages that are not built.
+
+#### Scenario: Unverified pin
+- **WHEN** `fix.title.pin` is `fix(deps): pin {name} to {to}` and the pin of `lz4-java` to 1.11.4 is published as unverified
+- **THEN** the title is `[unverified] fix(deps): pin lz4-java to 1.11.4`
+
+### Requirement: Commit subject follows the title
+When the title of a request comes from a pattern, the system SHALL use the rendered title, markers included, as the subject of its commit. Without a pattern, the commit subject SHALL stay the default title without the `Deepward: ` prefix.
+
+#### Scenario: Conventional commit
+- **WHEN** a request is titled `fix(deps): bump kafka-clients from 4.4.0 to 4.5.0` from a pattern
+- **THEN** its commit subject is `fix(deps): bump kafka-clients from 4.4.0 to 4.5.0`
+
+### Requirement: Title pattern validation
+The system SHALL reject, when loading the configuration, an unknown key under `fix.title` and an unknown placeholder in a pattern, naming the key and the placeholder. A pattern that renders an empty title SHALL be rejected. Rendered titles SHALL be cut to 255 characters.
+
+#### Scenario: Unknown placeholder
+- **WHEN** `fix.title.update` is `chore(deps): bump {version}`
+- **THEN** configuration validation fails with an error naming `fix.title.update` and `{version}`
+
+#### Scenario: Unknown kind
+- **WHEN** `fix.title` contains a key `bugfix`
+- **THEN** configuration validation fails with an error naming the unknown key
+
+#### Scenario: Pattern without text
+- **WHEN** `fix.title.security` is `{project}` and the project is at the repository root
+- **THEN** configuration validation rejects the pattern because it can render an empty title
+
+### Requirement: Affected modules in the change request
+When the findings a change request fixes come from a project with modules, its description SHALL list, for each package change, the modules those findings affect. Change requests of projects without modules SHALL keep their current description.
+
+#### Scenario: Pin affecting two modules
+- **WHEN** a change request pins `lz4-java` to 1.11.4 and the fixed findings list modules `wr-history-api` and `wr-history-app`
+- **THEN** the description names `wr-history-api` and `wr-history-app` for that change
+
+### Requirement: NuGet pins in the entering modules
+In a NuGet project with modules, a pin of a transitive package SHALL be a `PackageVersion` in `Directory.Packages.props` when Central Package Management pins transitively (`CentralPackageTransitivePinningEnabled`). Otherwise it SHALL add a `PackageReference` to each module through which the package enters the project from outside, that is, each module that reaches it without passing through another module.
+
+#### Scenario: Pin in the module that brings the package
+- **WHEN** `Web` and `Api` reference `Core`, `Core` brings vulnerable `System.Text.Json` through a package, and transitive pinning is off
+- **THEN** the change request adds a `PackageReference` for `System.Text.Json` only to `Core.csproj`
+
+#### Scenario: Central transitive pinning
+- **WHEN** `Directory.Packages.props` sets `CentralPackageTransitivePinningEnabled` to `true`
+- **THEN** the change request adds only a `PackageVersion` to `Directory.Packages.props`
+
+#### Scenario: One fix for the whole solution
+- **WHEN** a vulnerable package is reached by thirty project files of one CPM project
+- **THEN** one change request fixes it, editing `Directory.Packages.props` once
+
+### Requirement: Requests of merged projects are closed
+When an open bot request belongs to a project that is no longer detected and whose directory now lies inside a scanned project of the same ecosystem, the system SHALL close it with a comment naming the project that replaces it. Requests of projects that are missing for other reasons SHALL stay open.
+
+#### Scenario: Project file became a module
+- **WHEN** a request for project `nuget:src/Web` is open and `src/Web/Web.csproj` is now a module of `nuget:.`
+- **THEN** the request is closed with a comment saying its project is now part of `nuget:.`
+
+#### Scenario: Project removed from the repository
+- **WHEN** a request belongs to project `nuget:legacy` and no scanned project contains `legacy/`
+- **THEN** the request stays open
+
+
+### Requirement: Verification in batches
+With `fix.verify: batch` (the default), the system SHALL verify in rounds: each round takes the next untried alternative of every target without a verified change, applies each batch of independent changes together in one copy and rebuilds the graph once per batch. A change SHALL be accepted when the project builds and its targeted findings are gone. With `fix.verify: each`, every alternative SHALL get its own rebuild. For independent changes, both modes SHALL produce the same plan.
+
+#### Scenario: Twelve independent fixes
+- **WHEN** a project has twelve change groups whose first alternatives are independent and pass
+- **THEN** verification rebuilds the graph once with `batch` and twelve times with `each`, and both runs produce the same change sets
+
+#### Scenario: Second alternatives
+- **WHEN** six of twelve independent groups need their second alternative
+- **THEN** `batch` rebuilds the graph twice, once per round, and `each` eighteen times
+
+### Requirement: Bisection of failing batches
+When a batch does not build, the system SHALL split it in halves and verify each half until the changes that break the build are found; those SHALL be rejected as `the project no longer builds`, and the other changes SHALL keep the verdicts of the smallest batch that built. When every half builds but the whole batch does not, the changes of that batch SHALL be verified one by one.
+
+#### Scenario: One change breaks the build
+- **WHEN** one of eight independent changes in a batch makes the build fail
+- **THEN** the halves containing it are verified until it is found, it is rejected as `the project no longer builds`, and the seven others are accepted
+
+#### Scenario: Changes that break only together
+- **WHEN** a batch does not build but each of its halves does
+- **THEN** its changes are verified one by one and the result matches `fix.verify: each`
+
+### Requirement: Independent changes
+Changes of different change groups SHALL share a batch only when the packages they declare as affected do not overlap; a pin or an upgrade SHALL declare its package and every package it currently brings in. Changes of the same change group SHALL be verified together, as they are published together. A change that declares no affected packages SHALL be verified in a batch of its own.
+
+#### Scenario: Upgrade and pin of the same package
+- **WHEN** one group upgrades `parent` from 1.0 to 2.0, which brings `child`, and another group pins `child`
+- **THEN** the two changes are verified in different batches, so the upgrade is accepted only if it clears its findings without the pin
+
+#### Scenario: Text edit without affected packages
+- **WHEN** a remediation is a text edit that declares no affected packages
+- **THEN** it is verified in a batch of its own
+
+### Requirement: Graph rebuilds in the verification summary
+The system SHALL report in the `fixes verified` progress line the number of graph rebuilds verification needed (`graphBuilds`), not counting the scan before verification or results reused from a rebuild of identical files.
+
+#### Scenario: Comparing modes
+- **WHEN** the same workspace is fixed with `fix.verify: each` and with the default
+- **THEN** both `fixes verified` lines report `graphBuilds`, and the default reports fewer for independent changes

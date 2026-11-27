@@ -17,21 +17,27 @@
    the shared `val`, for NuGet the `PackageReference`, `$(Property)` or
    `Directory.Packages.props`. Formatting and comments stay untouched. For
    npm, Yarn, pnpm, Go and Cargo the package manager then updates the
-   lockfile (see the [ecosystem docs](ecosystems)). Then the
-   `fix.postTasks` commands run in the copy, for example to regenerate code
-   or checksums that depend on versions; their output joins the change.
+   lockfile (see the [ecosystem docs](ecosystems)).
 4. **Verify** by rebuilding the graph on the edited copy and running the same
    analyzers. A change is kept only if the targeted findings are gone and the
-   build still works. For a vulnerable transitive dependency there are two
-   ways: pin the transitive version (Maven `dependencyManagement`, NuGet CPM
-   or `PackageReference`, npm `overrides`, pnpm `pnpm.overrides`, Yarn
+   build still works. By default (`fix.verify: batch`) independent changes of
+   different requests are verified together in one rebuild, and a batch that
+   breaks the build is split until the breaking change is found;
+   `fix.verify: each` rebuilds for every change (see
+   [configuration.md](configuration.md#speed)). For a vulnerable transitive
+   dependency there are two ways: pin the transitive version (Maven
+   `dependencyManagement`, NuGet CPM or `PackageReference`, npm `overrides`, pnpm `pnpm.overrides`, Yarn
    `resolutions`, `go get`, `cargo update --precise`), or upgrade the direct
    dependency that brings it in to a version that brings a fixed one.
    `fix.transitive` decides which comes first: `upgrade` (the default) or
    `pin`; the other is tried when the first does not pass verification.
    For sbt Deepward prints a ready-to-paste `dependencyOverrides` line
    instead of a pin.
-5. **Report**: without `--publish`, Deepward prints a unified diff per change
+5. **Assemble** every change request on a clean copy that holds only its
+   verified changes. The `fix.postTasks` commands run there once, for example
+   to regenerate code or checksums that depend on versions; their output
+   joins the request's commit. A failing task drops the request.
+6. **Report**: without `--publish`, Deepward prints a unified diff per change
    request and writes nothing. With `--publish`, it creates or updates merge
    or pull requests.
 
@@ -77,7 +83,10 @@ tasks fail are never published.
   `Deepward: fix vulnerabilities in 3 packages, update 5 dependencies` for a
   `type` or `project` batch; `Deepward: update jackson (3 changes)` for a
   `groups` rule. ` in <directory>` is added for projects outside the root,
-  ` (not built)` as described below.
+  ` (not built)` as described below. `fix.title` replaces these titles with your own
+  patterns per kind of request, for example Conventional Commits (see
+  [configuration.md](configuration.md#titles)); the commit subject then
+  follows the title.
 - **Re-runs update** the existing request: the branch is recreated from the
   current target branch (force-push) and the description is refreshed. No
   duplicates are created.
@@ -88,6 +97,11 @@ tasks fail are never published.
   comments once.
 - **Stale requests are closed** with a comment when the update is no longer
   needed, for example because the package was updated by hand.
+- **Merged projects**: when a project is no longer detected because it became
+  part of a larger one (a .NET project file that is now a module of its
+  solution), its open requests are closed with a comment naming the new
+  project. Requests of projects that failed, were excluded or were removed
+  stay open.
 - **Limit**: at most `fix.limit` (default 5) open bot requests. Fixes for
   critical and high vulnerabilities bypass the limit. Other changes are
   reported as deferred.

@@ -90,26 +90,55 @@ var scopeOf = map[string]string{"compile": deps.ScopeCompile, "runtime": deps.Sc
 var scopeRank = map[string]int{deps.ScopeCompile: 6, deps.ScopeRuntime: 5, deps.ScopeProvided: 4, "optional": 3, deps.ScopeTest: 1}
 
 // BuildGraph merges the reports of all subprojects (and Scala versions) into
-// one project graph. Modules of the build itself are not nodes: their
-// direct dependencies become direct dependencies of the root.
+// one project graph. With more than one subproject, every subproject is a
+// module node (identified and named by its sbt project ID) that points at
+// the libraries it declares and at the subprojects it depends on, and every
+// library records its scope in each subproject whose report contains it.
+// A build with one subproject keeps a flat graph whose root points at the
+// direct dependencies.
 func BuildGraph(root, source string, reports []ProjectReport) (*deps.Graph, error) {
-	build := map[string]bool{}
+	projectOf := map[string]string{}
 	for _, r := range reports {
-		build[buildKey(r.Module)] = true
+		projectOf[buildKey(r.Module)] = r.Project
+	}
+	projects := map[string]bool{}
+	for _, r := range reports {
+		projects[r.Project] = true
+	}
+	multi := len(projects) > 1
+	// declarer is the node that declares the dependencies of a build module.
+	declarer := func(project string) string {
+		if multi {
+			return deps.ModuleID(project)
+		}
+		return root
 	}
 	type acc struct {
-		node     deps.Node
-		projects map[string]bool
-		scalas   map[string]bool
+		node   deps.Node
+		scopes map[string]string
+		scalas map[string]bool
 	}
 	nodes := map[string]*acc{}
 	var edges []deps.Edge
+	var list []deps.Node
+	if multi {
+		for _, pr := range sortedSet(projects) {
+			list = append(list, deps.Node{ID: deps.ModuleID(pr), Ecosystem: deps.Maven, Name: pr, Kind: deps.KindModule})
+			edges = append(edges, deps.Edge{From: root, To: deps.ModuleID(pr)})
+		}
+	}
 	idOf := func(id string) (string, bool) {
 		org, name, rev, ok := splitID(id)
 		if !ok || rev == "" {
 			return "", false
 		}
 		return purl.New(purl.TypeMaven, org, name, rev).String(), true
+	}
+	widest := func(a, b string) string {
+		if scopeRank[b] > scopeRank[a] {
+			return b
+		}
+		return a
 	}
 	for _, r := range reports {
 		for _, c := range r.Configurations {
@@ -118,7 +147,16 @@ func BuildGraph(root, source string, reports []ProjectReport) (*deps.Graph, erro
 				continue
 			}
 			for _, m := range c.Modules {
-				if m.Evicted || build[buildKey(m.ID)] {
+				if m.Evicted {
+					continue
+				}
+				if dep, isBuild := projectOf[buildKey(m.ID)]; isBuild {
+					// A subproject this one depends on (dependsOn).
+					for _, caller := range m.Callers {
+						if from, ok := projectOf[buildKey(caller)]; ok && multi && from != dep {
+							edges = append(edges, deps.Edge{From: deps.ModuleID(from), To: deps.ModuleID(dep)})
+						}
+					}
 					continue
 				}
 				id, ok := idOf(m.ID)
@@ -129,18 +167,20 @@ func BuildGraph(root, source string, reports []ProjectReport) (*deps.Graph, erro
 				a := nodes[id]
 				if a == nil {
 					a = &acc{node: deps.Node{ID: id, Ecosystem: deps.Maven, Name: org + ":" + name, Version: rev, Scope: scope},
-						projects: map[string]bool{}, scalas: map[string]bool{}}
+						scopes: map[string]string{}, scalas: map[string]bool{}}
 					nodes[id] = a
-				} else if scopeRank[scope] > scopeRank[a.node.Scope] {
-					a.node.Scope = scope
+				} else {
+					a.node.Scope = widest(a.node.Scope, scope)
+				}
+				if multi {
+					a.scopes[deps.ModuleID(r.Project)] = widest(a.scopes[deps.ModuleID(r.Project)], scope)
 				}
 				if r.ScalaBinaryVersion != "" {
 					a.scalas[r.ScalaBinaryVersion] = true
 				}
 				for _, caller := range m.Callers {
-					if build[buildKey(caller)] {
-						a.projects[r.Project] = true
-						edges = append(edges, deps.Edge{From: root, To: id})
+					if from, isBuild := projectOf[buildKey(caller)]; isBuild {
+						edges = append(edges, deps.Edge{From: declarer(from), To: id})
 						continue
 					}
 					if from, ok := idOf(caller); ok {
@@ -150,18 +190,18 @@ func BuildGraph(root, source string, reports []ProjectReport) (*deps.Graph, erro
 			}
 		}
 	}
-	list := make([]deps.Node, 0, len(nodes))
 	known := map[string]bool{root: true}
+	for _, n := range list {
+		known[n.ID] = true
+	}
 	for id, a := range nodes {
 		known[id] = true
-		attrs := map[string]string{}
-		if len(a.projects) > 0 {
-			attrs["projects"] = strings.Join(sortedSet(a.projects), ",")
-		}
 		if len(a.scalas) > 0 {
-			attrs["scalaBinaryVersions"] = strings.Join(sortedSet(a.scalas), ",")
+			a.node.Attributes = map[string]string{"scalaBinaryVersions": strings.Join(sortedSet(a.scalas), ",")}
 		}
-		a.node.Attributes = attrs
+		if len(a.scopes) > 0 {
+			a.node.Modules = a.scopes
+		}
 		list = append(list, a.node)
 	}
 	// Callers can be evicted modules that are not nodes; drop such edges.

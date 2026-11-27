@@ -36,7 +36,7 @@ The system SHALL obtain transitive dependencies by invoking the ecosystem's buil
 - **THEN** the project is marked failed, the last 200 lines of tool output are kept in the results, and scanning of other projects continues
 
 ### Requirement: Normalized graph model
-Every graph node SHALL be identified by a purl (`pkg:maven/...`, `pkg:nuget/...`) and SHALL carry its ecosystem, resolved version, scope, a direct-dependency flag, and the paths from the project root to the node.
+Every package node SHALL be identified by a purl (`pkg:maven/...`, `pkg:nuget/...`) and SHALL carry its ecosystem, resolved version, scope, a direct-dependency flag, and the paths from the project root to the node. In a graph with module nodes, paths SHALL start at a module, and a package SHALL be direct when a module declares it.
 
 #### Scenario: Scala artifact with cross-version suffix
 - **WHEN** a Scala 2.13 sbt project depends on `"org.typelevel" %% "cats-core" % "2.10.0"`
@@ -49,6 +49,10 @@ Every graph node SHALL be identified by a purl (`pkg:maven/...`, `pkg:nuget/...`
 #### Scenario: Test-scoped dependency
 - **WHEN** a dependency is declared in Maven scope `test` or sbt configuration `Test`
 - **THEN** the node has scope `test` and can be filtered out by configuration
+
+#### Scenario: Path from a module
+- **WHEN** module `wr-history-api` of a Maven reactor declares `kafka-clients`, which depends on `lz4-java`
+- **THEN** the `lz4-java` node has the path `wr-history-api → kafka-clients → lz4-java`, and `kafka-clients` is direct
 
 ### Requirement: Private registries during resolution
 The system SHALL pass the project's private repository settings (settings.xml, `nuget.config`, sbt resolvers) to the build tool unchanged and take credentials from environment variables named in configuration. Credentials MUST NOT appear in logs, reports or captured tool output.
@@ -169,3 +173,96 @@ If the compiled package set cannot be determined, every Go module node SHALL kee
 #### Scenario: Package listing fails
 - **WHEN** `go list -deps` exits non-zero for every platform
 - **THEN** all module nodes have scope `compile` and the project is scanned
+
+### Requirement: Module nodes
+A graph MAY contain module nodes, one per member of a multi-module build. A module node SHALL have a stable ID unique in the project, a display name and the path of its manifest when it has one of its own. The project root SHALL point at the modules, each module at the packages it declares and at the modules it depends on. Module nodes SHALL NOT be treated as packages, and a graph without module nodes SHALL keep its current shape.
+
+#### Scenario: Two modules sharing a dependency
+- **WHEN** modules `api` and `domain` both declare `wr-commons` 2.2.0
+- **THEN** the graph has one `wr-commons@2.2.0` package node with edges from both module nodes, and the root points at `api` and `domain`
+
+#### Scenario: Dependency between modules
+- **WHEN** module `app` depends on module `domain`
+- **THEN** the graph has an edge from `app` to `domain`, and `domain` is not reported as a package
+
+#### Scenario: Ecosystem without modules
+- **WHEN** a Go module is scanned
+- **THEN** its graph has no module nodes and the root points at its direct dependencies as before
+
+### Requirement: Modules reaching a package
+For each package node the system SHALL determine the modules that reach it, directly or through other packages or modules, and its scope in each of them. The node scope SHALL be the widest of its per-module scopes.
+
+#### Scenario: Test library in every module
+- **WHEN** `mockito-core` is a `test` dependency in all seven modules that use it
+- **THEN** its scope is `test` in each of them and the node scope is `test`
+
+#### Scenario: Different scopes per module
+- **WHEN** `jackson-databind` is `compile` in `api` and `test` in `integration-tests`
+- **THEN** the node records `compile` for `api`, `test` for `integration-tests`, and scope `compile`
+
+#### Scenario: Different versions per module
+- **WHEN** module `api` resolves `jffi` 1.3.9 and module `domain` resolves `jffi` 1.2.16
+- **THEN** `jffi@1.3.9` is reached only by `api` and `jffi@1.2.16` only by `domain`
+
+#### Scenario: Package reached through another module
+- **WHEN** `app` depends on module `domain`, which declares `wr-commons`
+- **THEN** both `domain` and `app` reach `wr-commons`
+
+### Requirement: Maven modules
+The Maven graph SHALL contain one module node per reactor module, identified by its POM path and named by its artifactId, with the module's dependencies, its per-module scopes from that module's resolved tree, and edges to the reactor modules it depends on.
+
+#### Scenario: Nine-module reactor
+- **WHEN** a reactor root lists nine modules and `wr-history-api` declares `kafka-clients`
+- **THEN** the graph has nine module nodes, and the `kafka-clients` node is direct with an edge from `wr-history-api`
+
+### Requirement: sbt subprojects as modules
+The sbt graph SHALL contain one module node per subproject, identified and named by its sbt project ID, with the subproject's dependencies and its per-subproject scopes, and edges to the subprojects it depends on.
+
+#### Scenario: Two subprojects
+- **WHEN** subproject `core` depends on `cats-core` in `Compile` and subproject `web` depends on `core` and on `http4s` in `Compile`
+- **THEN** the graph has module nodes `core` and `web`, an edge from `web` to `core`, and `cats-core` is reached by both with scope `compile`
+
+### Requirement: NuGet project boundaries
+A NuGet project SHALL contain the project files (`*.csproj`, `*.fsproj`, `*.vbproj`) under the same boundary, chosen per project file: the directory of the nearest `Directory.Packages.props` at or above it; else the directory of the nearest `.sln` or `.slnx` at or above it that lists it (the first by path when two are equally near); else its own directory. Every project file SHALL belong to exactly one project.
+
+#### Scenario: Central Package Management root
+- **WHEN** the repository root has `Directory.Packages.props` and project files `src/Web/Web.csproj`, `src/Core/Core.csproj` and `tests/Core.Tests/Core.Tests.csproj`
+- **THEN** one project `nuget:.` is reported with the three project files as its modules
+
+#### Scenario: Solution without CPM
+- **WHEN** `App.sln` at the root lists `Web/Web.csproj` and `Core/Core.csproj`, and there is no `Directory.Packages.props`
+- **THEN** one project `nuget:.` is reported with both project files
+
+#### Scenario: Project file in no solution
+- **WHEN** `legacy/Old.csproj` is listed by no solution and has no `Directory.Packages.props` above it
+- **THEN** it forms the project `nuget:legacy` as before
+
+#### Scenario: Project file in two solutions
+- **WHEN** `Core/Core.csproj` is listed by `App.sln` and `tools/Tools.sln`, and there is no `Directory.Packages.props`
+- **THEN** it belongs only to the project of `App.sln`, the nearer solution above it
+
+### Requirement: NuGet project files as modules
+In a NuGet project with more than one project file, every project file SHALL be a module node identified by its path and named by its file name without extension, with edges to the packages it references and to the project files it references through `ProjectReference`. Each package SHALL record every module whose resolved assets contain it.
+
+#### Scenario: Package flowing through a project reference
+- **WHEN** `Web.csproj` references `Core.csproj`, which references `Newtonsoft.Json` 12.0.1
+- **THEN** the graph has an edge from `Web` to `Core` and from `Core` to `Newtonsoft.Json@12.0.1`, and both modules reach `Newtonsoft.Json`
+
+#### Scenario: One project file
+- **WHEN** a project has a single project file
+- **THEN** its graph has no module nodes, as before
+
+### Requirement: One restore per NuGet project
+The system SHALL run `dotnet restore` once for a project that has a solution, on that solution; otherwise once per project file that no other project file of the project references. It SHALL then read the assets file of every project file of the project; a project file left without an assets file (a solution restore skips projects its active configuration does not build) SHALL be restored on its own once, and its assets file read again.
+
+#### Scenario: Solution with thirty projects
+- **WHEN** a project is bounded by `App.sln`, which lists thirty project files
+- **THEN** `dotnet restore App.sln` runs once, and the graph covers the thirty project files
+
+#### Scenario: CPM root without a solution
+- **WHEN** a CPM project has `Web.csproj` (referencing `Core.csproj`) and `Worker.csproj`, and no solution
+- **THEN** `dotnet restore` runs for `Web.csproj` and `Worker.csproj` but not for `Core.csproj`
+
+#### Scenario: Project file skipped by the solution restore
+- **WHEN** `App.sln` lists `Web.csproj` and `Tools.csproj`, and its active configuration builds only `Web.csproj`
+- **THEN** `dotnet restore App.sln` runs, then `dotnet restore Tools.csproj`, and the graph covers both project files

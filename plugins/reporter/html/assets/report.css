@@ -133,6 +133,9 @@ tr.detail > td { padding: 0; background: var(--sunken); border-bottom: 1px solid
 .chains .hop { color: var(--muted); }
 .chains .sep { color: var(--faint); margin: 0 5px; }
 .chains .target { color: var(--high); font-weight: 600; }
+.mod { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+.chains .mod::before, .mods .mod::before { content: "\25A3  "; color: var(--faint); font-size: 10px; }
+.mods .sep { color: var(--faint); margin: 0 6px; }
 
 /* Advisories inside a row */
 table.advisories { margin-top: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; }

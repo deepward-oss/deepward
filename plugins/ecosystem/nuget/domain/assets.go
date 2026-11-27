@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"sort"
 	"strings"
 
@@ -23,6 +24,13 @@ type Library struct {
 type Assets struct {
 	Version int                           `json:"version"`
 	Targets map[string]map[string]Library `json:"targets"`
+	// Libraries describe the libraries of the targets; for project
+	// references, Path is the referenced project file relative to the
+	// owner's directory.
+	Libraries map[string]struct {
+		Type string `json:"type"`
+		Path string `json:"path"`
+	} `json:"libraries"`
 	Project struct {
 		Restore struct {
 			ProjectName string `json:"projectName"`
@@ -62,17 +70,59 @@ func framework(target string) string {
 	return fw
 }
 
-// BuildGraph merges several assets files (one per project file of the
-// project directory) into one graph. Project-to-project references are part
-// of the build: their dependencies become direct dependencies of the root.
-func BuildGraph(root, source string, all []*Assets) (*deps.Graph, error) {
+// OwnedAssets is the assets file of one project file (its workspace path).
+type OwnedAssets struct {
+	Path   string
+	Assets *Assets
+}
+
+// BuildGraph merges the assets files of the project files of one project.
+// With more than one project file, each is a module node (identified by
+// its path, named by its file name without extension) that points at the
+// packages it references and at the member project files it references;
+// every package records each module whose assets contain it. A project
+// reference outside the project is not a module: its packages hang off the
+// referencing project. With one project file the graph is flat.
+func BuildGraph(root, source string, owned []OwnedAssets) (*deps.Graph, error) {
+	multi := len(owned) > 1
+	moduleOf := map[string]string{}
+	var list []deps.Node
+	var edges []deps.Edge
+	if multi {
+		for _, o := range owned {
+			id := deps.ModuleID(o.Path)
+			moduleOf[o.Path] = id
+			name := strings.TrimSuffix(path.Base(o.Path), path.Ext(o.Path))
+			list = append(list, deps.Node{ID: id, Ecosystem: deps.NuGet, Name: name, Kind: deps.KindModule,
+				Attributes: map[string]string{"manifest": o.Path}})
+			edges = append(edges, deps.Edge{From: root, To: id})
+		}
+	}
 	type acc struct {
-		node deps.Node
-		fws  map[string]bool
+		node    deps.Node
+		fws     map[string]bool
+		modules map[string]string
 	}
 	nodes := map[string]*acc{}
-	var edges []deps.Edge
-	for _, a := range all {
+	for _, o := range owned {
+		a := o.Assets
+		owner := root
+		if multi {
+			owner = moduleOf[o.Path]
+		}
+		// memberModule maps a project library to the module of a member.
+		memberModule := func(key string) (string, bool) {
+			lib, ok := a.Libraries[key]
+			if !ok || !multi || !strings.EqualFold(lib.Type, "project") || lib.Path == "" {
+				return "", false
+			}
+			pf, ok := Resolve(path.Dir(o.Path), normalize(lib.Path))
+			if !ok {
+				return "", false
+			}
+			id, ok := moduleOf[pf]
+			return id, ok
+		}
 		targets := make([]string, 0, len(a.Targets))
 		for t := range a.Targets {
 			targets = append(targets, t)
@@ -108,10 +158,14 @@ func BuildGraph(root, source string, all []*Assets) (*deps.Graph, error) {
 				id := nodeID(key)
 				n := nodes[id]
 				if n == nil {
-					n = &acc{node: deps.Node{ID: id, Ecosystem: deps.NuGet, Name: name, Version: ver, Scope: deps.ScopeCompile}, fws: map[string]bool{}}
+					n = &acc{node: deps.Node{ID: id, Ecosystem: deps.NuGet, Name: name, Version: ver, Scope: deps.ScopeCompile},
+						fws: map[string]bool{}, modules: map[string]string{}}
 					nodes[id] = n
 				}
 				n.fws[fw] = true
+				if multi {
+					n.modules[owner] = deps.ScopeCompile
+				}
 			}
 			link := func(from string, depName string) {
 				key, ok := byName[strings.ToLower(depName)]
@@ -121,11 +175,19 @@ func BuildGraph(root, source string, all []*Assets) (*deps.Graph, error) {
 				edges = append(edges, deps.Edge{From: from, To: nodeID(key)})
 			}
 			for key, lib := range libs {
-				from := root
-				if isPackage(key) {
+				from := owner
+				switch {
+				case isPackage(key):
 					from = nodeID(key)
-				} else if kind[key] != "project" {
+				case kind[key] != "project":
 					continue
+				default:
+					if id, ok := memberModule(key); ok {
+						if id != owner {
+							edges = append(edges, deps.Edge{From: owner, To: id})
+						}
+						from = id
+					}
 				}
 				for dep := range lib.Dependencies {
 					link(from, dep)
@@ -134,13 +196,12 @@ func BuildGraph(root, source string, all []*Assets) (*deps.Graph, error) {
 			if f, ok := a.Project.Frameworks[fw]; ok {
 				for dep, d := range f.Dependencies {
 					if d.Target == "" || strings.EqualFold(d.Target, "Package") {
-						link(root, dep)
+						link(owner, dep)
 					}
 				}
 			}
 		}
 	}
-	list := make([]deps.Node, 0, len(nodes))
 	for _, n := range nodes {
 		fws := make([]string, 0, len(n.fws))
 		for f := range n.fws {
@@ -148,6 +209,9 @@ func BuildGraph(root, source string, all []*Assets) (*deps.Graph, error) {
 		}
 		sort.Strings(fws)
 		n.node.Attributes = map[string]string{"targetFrameworks": strings.Join(fws, ",")}
+		if len(n.modules) > 0 {
+			n.node.Modules = n.modules
+		}
 		list = append(list, n.node)
 	}
 	return deps.NewGraph(root, source, list, edges)

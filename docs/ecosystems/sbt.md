@@ -23,8 +23,13 @@ Deepward does not parse build files to find dependencies. It asks sbt:
 4. It deletes the temporary files.
 
 Nothing in the repository is modified, and no third-party sbt plugin is
-resolved. Evicted modules are dropped. Modules of the build itself (for
-example `core` used by `root`) are not graph nodes. Scala artifacts keep
+resolved. Evicted modules are dropped. In a build with more than one
+subproject, every subproject is a **module** of the project: paths start at
+the subproject (`root → core → cats-core`, `core` used by `root` being a
+step in the path, not a package), every library records its scope in each
+subproject whose report contains it, and findings list the affected
+subprojects. A build with one subproject keeps paths that start at the
+dependency. Scala artifacts keep
 their binary suffix (`cats-core_2.13`), so updates are only looked up for the
 same Scala version (`cats-core_3` is never proposed for a 2.13 build).
 

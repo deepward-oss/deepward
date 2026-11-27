@@ -129,21 +129,31 @@ func (p *Plugin) ToolRequirements() []sdk.ToolRequirement {
 	return []sdk.ToolRequirement{{Name: "dotnet", Constraint: MinDotnet, Purpose: "restore packages and build the dependency graph"}}
 }
 
-// Detect implements sdk.Ecosystem: one project per directory containing
-// project files.
+// Detect implements sdk.Ecosystem. Each project file belongs to one
+// project, bounded by the nearest Directory.Packages.props at or above it
+// (the Central Package Management root), else by the nearest solution
+// (.sln, .slnx) at or above it that lists it, else by its own directory.
 func (p *Plugin) Detect(ctx context.Context, ws *sdk.Workspace) ([]sdk.Project, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	byDir := map[string][]string{}
+	var projectFiles, solutions []string
+	cpmDirs := map[string]bool{}
 	shared := map[string]bool{}
 	err := ws.Walk(func(rel string, d fs.DirEntry) error {
 		if d.IsDir() {
 			return nil
 		}
 		base := path.Base(rel)
-		if projectExts[strings.ToLower(path.Ext(base))] {
-			byDir[path.Dir(rel)] = append(byDir[path.Dir(rel)], rel)
+		lower := strings.ToLower(base)
+		switch {
+		case domain.IsProjectFile(rel):
+			projectFiles = append(projectFiles, rel)
+		case strings.HasSuffix(lower, ".sln") || strings.HasSuffix(lower, ".slnx"):
+			solutions = append(solutions, rel)
+		}
+		if base == "Directory.Packages.props" {
+			cpmDirs[path.Dir(rel)] = true
 		}
 		for _, s := range sharedManifests {
 			if base == s {
@@ -158,18 +168,69 @@ func (p *Plugin) Detect(ctx context.Context, ws *sdk.Workspace) ([]sdk.Project, 
 	if err != nil {
 		return nil, err
 	}
+	sort.Strings(solutions)
+	listedBy := map[string][]string{} // project file -> solutions listing it
+	listed := map[string][]string{}   // solution -> project files it lists
+	for _, sol := range solutions {
+		data, err := fs.ReadFile(ws.FS, sol)
+		if err != nil {
+			continue
+		}
+		var rels []string
+		if strings.HasSuffix(strings.ToLower(sol), ".slnx") {
+			rels, _ = domain.SlnxProjects(data)
+		} else {
+			rels = domain.SolutionProjects(data)
+		}
+		for _, r := range rels {
+			if pf, ok := domain.Resolve(path.Dir(sol), r); ok {
+				listedBy[pf] = append(listedBy[pf], sol)
+				listed[sol] = append(listed[sol], pf)
+			}
+		}
+	}
+	type group struct {
+		dir, boundary string
+		members       []string
+	}
+	groups := map[string]*group{}
+	for _, pf := range projectFiles {
+		dir := path.Dir(pf)
+		key, g := "", &group{dir: dir}
+		if cpm, ok := nearestAncestor(dir, cpmDirs); ok {
+			key, g.dir, g.boundary = "cpm:"+cpm, cpm, join(cpm, "Directory.Packages.props")
+		} else if sol, ok := nearestSolution(dir, listedBy[pf]); ok {
+			key, g.dir, g.boundary = "sln:"+sol, path.Dir(sol), sol
+		} else {
+			key = "dir:" + dir
+		}
+		if existing, ok := groups[key]; ok {
+			g = existing
+		} else {
+			groups[key] = g
+		}
+		g.members = append(g.members, pf)
+	}
 	var projects []sdk.Project
-	for dir, files := range byDir {
-		sort.Strings(files)
-		manifests := append([]string{}, files...)
-		// Shared files in the directory and its parents.
-		for d := dir; ; d = path.Dir(d) {
-			for _, s := range append(append([]string{}, sharedManifests...), "packages.lock.json") {
-				f := path.Join(d, s)
-				if d == "." {
-					f = s
-				}
-				if shared[f] && (s != "packages.lock.json" || d == dir) {
+	for _, g := range groups {
+		sort.Strings(g.members)
+		members := map[string]bool{}
+		for _, m := range g.members {
+			members[m] = true
+		}
+		manifests := append([]string{}, g.members...)
+		if g.boundary != "" && !strings.HasSuffix(g.boundary, "Directory.Packages.props") {
+			manifests = append(manifests, g.boundary)
+		}
+		for _, m := range g.members {
+			if lock := join(path.Dir(m), "packages.lock.json"); shared[lock] {
+				manifests = append(manifests, lock)
+			}
+		}
+		// Shared files in the project directory and its parents.
+		for d := g.dir; ; d = path.Dir(d) {
+			for _, s := range sharedManifests {
+				if f := join(d, s); shared[f] {
 					manifests = append(manifests, f)
 				}
 			}
@@ -177,11 +238,83 @@ func (p *Plugin) Detect(ctx context.Context, ws *sdk.Workspace) ([]sdk.Project, 
 				break
 			}
 		}
-		attrs := map[string]string{"projectFiles": strings.Join(files, ",")}
-		projects = append(projects, sdk.Project{ID: sdk.ProjectID(ID, dir), Ecosystem: ID, Dir: dir, Manifests: manifests, Attributes: attrs})
+		attrs := map[string]string{"projectFiles": strings.Join(g.members, ",")}
+		// Solutions to restore: those whose projects are all members.
+		var restore []string
+		for _, sol := range solutions {
+			all := len(listed[sol]) > 0
+			for _, pf := range listed[sol] {
+				all = all && members[pf]
+			}
+			if all && within(sol, g.dir) {
+				restore = append(restore, sol)
+			}
+		}
+		if len(restore) > 0 {
+			attrs["solutions"] = strings.Join(restore, ",")
+		}
+		projects = append(projects, sdk.Project{ID: sdk.ProjectID(ID, g.dir), Ecosystem: ID, Dir: g.dir, Manifests: dedupe(manifests), Attributes: attrs})
 	}
 	sort.Slice(projects, func(i, j int) bool { return projects[i].ID < projects[j].ID })
 	return projects, nil
+}
+
+// join is path.Join that keeps "x" for directory ".".
+func join(dir, name string) string {
+	if dir == "." || dir == "" {
+		return name
+	}
+	return dir + "/" + name
+}
+
+// within reports whether rel is in dir or below it.
+func within(rel, dir string) bool {
+	return dir == "." || rel == dir || strings.HasPrefix(rel, dir+"/")
+}
+
+// nearestAncestor returns the deepest directory of dirs that is dir or one
+// of its parents.
+func nearestAncestor(dir string, dirs map[string]bool) (string, bool) {
+	for d := dir; ; d = path.Dir(d) {
+		if dirs[d] {
+			return d, true
+		}
+		if d == "." || d == "/" {
+			return "", false
+		}
+	}
+}
+
+// nearestSolution picks, among the solutions listing a project file, the
+// one in the deepest directory at or above dir (the first by path on ties).
+func nearestSolution(dir string, sols []string) (string, bool) {
+	best, depth := "", -1
+	for _, sol := range sols {
+		sd := path.Dir(sol)
+		if !within(dir, sd) {
+			continue
+		}
+		d := 0
+		if sd != "." {
+			d = strings.Count(sd, "/") + 1
+		}
+		if d > depth || (d == depth && sol < best) {
+			best, depth = sol, d
+		}
+	}
+	return best, depth >= 0
+}
+
+func dedupe(xs []string) []string {
+	seen := map[string]bool{}
+	out := xs[:0]
+	for _, x := range xs {
+		if !seen[x] {
+			seen[x] = true
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 // Produces implements sdk.FactProducer.
@@ -190,8 +323,9 @@ func (p *Plugin) Produces() []string { return []string{deps.FactDependencyGraph}
 // AppliesTo implements sdk.FactProducer.
 func (p *Plugin) AppliesTo(pr sdk.Project) bool { return pr.Ecosystem == ID }
 
-// Produce implements sdk.FactProducer: dotnet restore, then parse
-// obj/project.assets.json of every project file in the directory.
+// Produce implements sdk.FactProducer: one dotnet restore per solution of
+// the project (and per member no other member references), then the
+// obj/project.assets.json of every member project file.
 func (p *Plugin) Produce(ctx context.Context, req sdk.FactRequest) (any, error) {
 	if req.Name != deps.FactDependencyGraph {
 		return nil, fmt.Errorf("nuget cannot produce %s", req.Name)
@@ -205,17 +339,12 @@ func (p *Plugin) Produce(ctx context.Context, req sdk.FactRequest) (any, error) 
 		return nil, err
 	}
 	dir := filepath.Join(req.Workspace.Root, filepath.FromSlash(project.Dir))
-	files := project.Manifests
-	if pf := project.Attributes["projectFiles"]; pf != "" {
-		files = strings.Split(pf, ",")
+	members := memberFiles(project)
+	if len(members) == 0 {
+		return nil, fmt.Errorf("no .NET project files in %s", project.Dir)
 	}
-	var all []*domain.Assets
-	for _, rel := range files {
-		if !projectExts[strings.ToLower(path.Ext(rel))] {
-			continue
-		}
-		file := filepath.Join(req.Workspace.Root, filepath.FromSlash(rel))
-		args := []string{"restore", file, "--nologo"}
+	restore := func(target string) error {
+		args := []string{"restore", filepath.Join(req.Workspace.Root, filepath.FromSlash(target)), "--nologo"}
 		if cf := p.cfg.ConfigFile; cf != "" {
 			if !filepath.IsAbs(cf) {
 				cf = filepath.Join(req.Workspace.Root, filepath.FromSlash(cf))
@@ -223,16 +352,28 @@ func (p *Plugin) Produce(ctx context.Context, req sdk.FactRequest) (any, error) 
 			args = append(args, "--configfile", cf)
 		}
 		if _, err := tool.Run(ctx, sdk.RunSpec{Args: args, Dir: dir, Env: dotnetEnv}); err != nil {
-			return nil, fmt.Errorf("dotnet restore %s failed: %w", rel, err)
+			return fmt.Errorf("dotnet restore %s failed: %w", target, err)
 		}
-		assetsPath := filepath.Join(filepath.Dir(file), "obj", "project.assets.json")
-		if _, err := os.Stat(assetsPath); err != nil {
-			// Custom intermediate paths: ask MSBuild (SDK 8+).
-			res, perr := tool.Run(ctx, sdk.RunSpec{Args: []string{"msbuild", file, "-getProperty:ProjectAssetsFile", "-nologo"}, Dir: dir})
-			if perr != nil || strings.TrimSpace(string(res.Stdout)) == "" {
+		return nil
+	}
+	for _, target := range restoreTargets(req.Workspace, project, members) {
+		if err := restore(target); err != nil {
+			return nil, err
+		}
+	}
+	var all []domain.OwnedAssets
+	for _, rel := range members {
+		file := filepath.Join(req.Workspace.Root, filepath.FromSlash(rel))
+		assetsPath, ok := assetsFile(ctx, tool, file, dir)
+		if !ok {
+			// A solution restore skips projects its active configuration does
+			// not build: restore such a project file on its own.
+			if err := restore(rel); err != nil {
+				return nil, err
+			}
+			if assetsPath, ok = assetsFile(ctx, tool, file, dir); !ok {
 				return nil, fmt.Errorf("project.assets.json not found for %s", rel)
 			}
-			assetsPath = strings.TrimSpace(string(res.Stdout))
 		}
 		f, err := os.Open(assetsPath)
 		if err != nil {
@@ -243,12 +384,99 @@ func (p *Plugin) Produce(ctx context.Context, req sdk.FactRequest) (any, error) 
 		if err != nil {
 			return nil, err
 		}
-		all = append(all, a)
-	}
-	if len(all) == 0 {
-		return nil, fmt.Errorf("no .NET project files in %s", project.Dir)
+		all = append(all, domain.OwnedAssets{Path: rel, Assets: a})
 	}
 	return domain.BuildGraph("project:"+project.ID, "dotnet restore (project.assets.json)", all)
+}
+
+// assetsFile finds the assets file of a restored project file: next to it
+// in obj/, else where MSBuild says (custom intermediate paths, SDK 8+).
+func assetsFile(ctx context.Context, tool sdk.Tool, file, dir string) (string, bool) {
+	assetsPath := filepath.Join(filepath.Dir(file), "obj", "project.assets.json")
+	if _, err := os.Stat(assetsPath); err == nil {
+		return assetsPath, true
+	}
+	res, err := tool.Run(ctx, sdk.RunSpec{Args: []string{"msbuild", file, "-getProperty:ProjectAssetsFile", "-nologo"}, Dir: dir})
+	if err != nil {
+		return "", false
+	}
+	custom := strings.TrimSpace(string(res.Stdout))
+	if custom == "" {
+		return "", false
+	}
+	if _, err := os.Stat(custom); err != nil {
+		return "", false
+	}
+	return custom, true
+}
+
+// memberFiles lists the project files of a project.
+func memberFiles(project sdk.Project) []string {
+	files := project.Manifests
+	if pf := project.Attributes["projectFiles"]; pf != "" {
+		files = strings.Split(pf, ",")
+	}
+	var out []string
+	for _, f := range files {
+		if domain.IsProjectFile(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// restoreTargets returns what to pass to dotnet restore: the project's
+// solutions, then each member that no solution lists and no other member
+// references (restoring a project file restores what it references). If
+// references form a cycle with nothing left to start from, every member is
+// restored.
+func restoreTargets(ws *sdk.Workspace, project sdk.Project, members []string) []string {
+	var targets []string
+	covered := map[string]bool{}
+	for _, sol := range strings.Split(project.Attributes["solutions"], ",") {
+		if sol == "" {
+			continue
+		}
+		data, err := fs.ReadFile(ws.FS, sol)
+		if err != nil {
+			continue
+		}
+		var rels []string
+		if strings.HasSuffix(strings.ToLower(sol), ".slnx") {
+			rels, _ = domain.SlnxProjects(data)
+		} else {
+			rels = domain.SolutionProjects(data)
+		}
+		targets = append(targets, sol)
+		for _, r := range rels {
+			if pf, ok := domain.Resolve(path.Dir(sol), r); ok {
+				covered[pf] = true
+			}
+		}
+	}
+	referenced := map[string]bool{}
+	for _, m := range members {
+		data, err := fs.ReadFile(ws.FS, m)
+		if err != nil {
+			continue
+		}
+		refs, _ := domain.ProjectReferences(data)
+		for _, r := range refs {
+			if pf, ok := domain.Resolve(path.Dir(m), r); ok {
+				referenced[pf] = true
+			}
+		}
+	}
+	var rest []string
+	for _, m := range members {
+		if !covered[m] && !referenced[m] {
+			rest = append(rest, m)
+		}
+	}
+	if len(targets) == 0 && len(rest) == 0 {
+		return members
+	}
+	return append(targets, rest...)
 }
 
 // Versions implements deps.VersionRegistry.

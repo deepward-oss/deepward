@@ -46,6 +46,36 @@ analyzer is skipped for that project with reason `fact-unavailable: <name>`.
 Fact values that implement `sdk.ReportableFact` are embedded in the JSON
 report (the dependency graph does this).
 
+### Modules in the dependency graph
+
+A multi-module build (a Maven reactor, an sbt build) can describe its
+members as **module nodes**: `deps.Node{ID: deps.ModuleID(key), Kind:
+deps.KindModule, Name: ...}`, with `Attributes["manifest"]` set to the
+module's own manifest when it has one. The project root points at the
+modules, each module at the packages it declares and at the modules it
+depends on. `deps.NewGraph` then:
+
+- marks a package as direct when the root or a module declares it;
+- fills `Node.Modules` (module ID → the package's scope in that module) for
+  every module that reaches the package through packages, keeping the scopes
+  the ecosystem plugin already set and using the node scope for the others.
+  The walk does not cross other modules: set what a module gets through a
+  module it depends on yourself, from the build tool's per-module view, so
+  that test-only dependencies of one module do not leak into another.
+
+`Graph.Packages()` never returns modules (use `Graph.Modules()`),
+`DirectAncestors` never returns a module, and `Paths` start at a module.
+Analyzers report the modules of a package in `sdk.PackageLocation.Modules`
+(`sdk.ModuleRef`: ID, name, scope, direct). A graph without module nodes
+works exactly as before, so ecosystem plugins adopt modules when they can.
+
+For a pin of a transitive package, the dependency-vulnerabilities analyzer
+sets `sdk.PackageChange.Targets` to the manifests of `Graph.EntryModules`:
+the modules through which the package enters the project, without passing
+through another module. A `RemediationRealizer` that pins per module (NuGet
+without central transitive pinning) applies the pin there; one that pins in a
+single central place (Maven `dependencyManagement`) ignores `Targets`.
+
 ## Findings and remediations
 
 Every analyzer returns `[]sdk.Finding`, one generic model modelled on SARIF
@@ -60,6 +90,15 @@ ecosystem's `RemediationRealizer`) or a list of `TextEdit`s that the fix
 pipeline applies directly. When there are several remediations, they are
 alternatives in order of preference: the fix pipeline tries them in order and
 publishes the first one that passes verification.
+
+A remediation can declare in `Affects` the packages it may alter, as package
+URLs without version (`pkg:maven/org.example/lib`): for a pin or an upgrade,
+the changed package and every package it currently brings in
+(`deps.Graph.Affected` computes this list from the dependency graph). The fix
+pipeline verifies changes of different change requests in one graph rebuild
+only when their `Affects` do not overlap. A remediation with an empty
+`Affects` (text edits, analyzers that do not know the graph) is verified on
+its own, which is always correct but slower.
 
 ## Running external tools
 

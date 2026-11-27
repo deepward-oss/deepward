@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
-	"strings"
 
 	"github.com/deepward-oss/deepward/pkg/sdk/deps"
 	"github.com/deepward-oss/deepward/pkg/sdk/purl"
@@ -50,38 +48,76 @@ func ParseTrees(r io.Reader) ([]TreeNode, error) {
 
 var scopeRank = map[string]int{deps.ScopeCompile: 5, deps.ScopeRuntime: 4, deps.ScopeProvided: 3, deps.ScopeSystem: 2, deps.ScopeTest: 1}
 
-// BuildGraph merges module trees into one project graph. Reactor modules are
-// the project itself, so they are not graph nodes: their direct dependencies
-// become direct dependencies of the project root, annotated with the modules
-// that declare them.
-func BuildGraph(root, source string, trees []TreeNode) (*deps.Graph, error) {
-	modules := map[string]string{}
+// BuildGraph merges module trees into one project graph. With more than one
+// reactor module, every module is a module node (named by its artifactId,
+// identified by its POM path from manifests, keyed by "groupId:artifactId")
+// that points at its dependencies and at the modules it depends on, and
+// every package records its scope in each module. A single-module project
+// keeps a flat graph whose root points at the dependencies.
+func BuildGraph(root, source string, trees []TreeNode, manifests map[string]string) (*deps.Graph, error) {
+	multi := len(trees) > 1
+	moduleIDs := map[string]string{}
+	var list []deps.Node
 	for _, t := range trees {
-		modules[t.coordinates()] = t.ArtifactID
+		key := manifests[t.coordinates()]
+		if key == "" {
+			key = t.coordinates()
+		}
+		id := root
+		if multi {
+			id = deps.ModuleID(key)
+			n := deps.Node{ID: id, Ecosystem: deps.Maven, Name: t.ArtifactID, Version: t.Version, Kind: deps.KindModule}
+			if path := manifests[t.coordinates()]; path != "" {
+				n.Attributes = map[string]string{"manifest": path}
+			}
+			list = append(list, n)
+		}
+		moduleIDs[t.coordinates()] = id
 	}
 	type acc struct {
-		node    deps.Node
-		modules map[string]bool
+		node   deps.Node
+		scopes map[string]string
 	}
 	nodes := map[string]*acc{}
 	var edges []deps.Edge
-	var add func(parent string, n TreeNode, module string, direct bool)
-	add = func(parent string, n TreeNode, module string, direct bool) {
-		if _, isModule := modules[n.coordinates()]; isModule {
+	widest := func(a, b string) string {
+		if scopeRank[b] > scopeRank[a] {
+			return b
+		}
+		return a
+	}
+	// add walks n below parent in the tree of module. Inside the inlined
+	// subtree of another module (link false) it only records scopes: that
+	// module's own tree provides the edges.
+	var add func(parent string, n TreeNode, module string, link bool)
+	add = func(parent string, n TreeNode, module string, link bool) {
+		if id, isModule := moduleIDs[n.coordinates()]; isModule {
+			if !multi {
+				return
+			}
+			if link {
+				edges = append(edges, deps.Edge{From: parent, To: id})
+			}
+			for _, c := range n.Children {
+				add(id, c, module, false)
+			}
 			return
 		}
 		p := purl.New(purl.TypeMaven, n.GroupID, n.ArtifactID, n.Version)
 		id := p.String()
-		a, ok := nodes[id]
 		scope := n.Scope
 		if scope == "" {
 			scope = deps.ScopeCompile
 		}
+		a, ok := nodes[id]
 		if !ok {
-			a = &acc{node: deps.Node{ID: id, Ecosystem: deps.Maven, Name: n.coordinates(), Version: n.Version, Scope: scope}, modules: map[string]bool{}}
+			a = &acc{node: deps.Node{ID: id, Ecosystem: deps.Maven, Name: n.coordinates(), Version: n.Version, Scope: scope}, scopes: map[string]string{}}
 			nodes[id] = a
-		} else if scopeRank[scope] > scopeRank[a.node.Scope] {
-			a.node.Scope = scope
+		} else {
+			a.node.Scope = widest(a.node.Scope, scope)
+		}
+		if multi {
+			a.scopes[module] = widest(a.scopes[module], scope)
 		}
 		if n.Optional == "true" {
 			if a.node.Attributes == nil {
@@ -89,31 +125,25 @@ func BuildGraph(root, source string, trees []TreeNode) (*deps.Graph, error) {
 			}
 			a.node.Attributes["optional"] = "true"
 		}
-		if direct {
-			a.modules[module] = true
+		if link {
+			edges = append(edges, deps.Edge{From: parent, To: id})
 		}
-		edges = append(edges, deps.Edge{From: parent, To: id})
 		for _, c := range n.Children {
-			add(id, c, module, false)
+			add(id, c, module, link)
 		}
 	}
 	for _, t := range trees {
+		module := moduleIDs[t.coordinates()]
+		if multi {
+			edges = append(edges, deps.Edge{From: root, To: module})
+		}
 		for _, c := range t.Children {
-			add(root, c, t.ArtifactID, true)
+			add(module, c, module, true)
 		}
 	}
-	list := make([]deps.Node, 0, len(nodes))
 	for _, a := range nodes {
-		if len(a.modules) > 0 {
-			ms := make([]string, 0, len(a.modules))
-			for m := range a.modules {
-				ms = append(ms, m)
-			}
-			sort.Strings(ms)
-			if a.node.Attributes == nil {
-				a.node.Attributes = map[string]string{}
-			}
-			a.node.Attributes["modules"] = strings.Join(ms, ",")
+		if len(a.scopes) > 0 {
+			a.node.Modules = a.scopes
 		}
 		list = append(list, a.node)
 	}

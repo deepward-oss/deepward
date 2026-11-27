@@ -295,13 +295,17 @@ func (a *Analyzer) findings(ctx context.Context, req sdk.AnalyzeRequest, g *deps
 	} else if len(ancestors) > 0 {
 		up.ancestor, _ = g.Node(ancestors[0])
 	}
-	remediations := a.remediations(ctx, req, n, pkg, fixed, hasFix, up, registry)
+	remediations := a.remediations(ctx, req, g, n, pkg, fixed, hasFix, up, registry)
 	paths := g.Paths(n.ID, a.cfg.MaxPaths)
 	declaring := n
 	if up.ancestor.ID != "" {
 		declaring = up.ancestor
 	}
-	fileLoc := manifestLocation(req, declaring)
+	var preferred []string
+	if m, ok := g.DeclaringModule(declaring.ID, n.ID); ok && m.Attributes["manifest"] != "" {
+		preferred = []string{m.Attributes["manifest"]}
+	}
+	fileLoc := manifestLocation(req, declaring, preferred...)
 	var out []sdk.Finding
 	for _, grp := range domain.Deduplicate(matched) {
 		rating := domain.Rate(grp.Advisories)
@@ -316,7 +320,7 @@ func (a *Analyzer) findings(ctx context.Context, req sdk.AnalyzeRequest, g *deps
 			f.Message += ": " + summary
 		}
 		f.Locations = append(f.Locations, sdk.Location{File: fileLoc,
-			Package: &sdk.PackageLocation{PURL: n.ID, Paths: paths, Direct: n.Direct, Scope: n.Scope}})
+			Package: &sdk.PackageLocation{PURL: n.ID, Paths: paths, Direct: n.Direct, Scope: n.Scope, Modules: g.ModuleRefs(n.ID)}})
 		f.References = references(grp)
 		props := map[string]any{
 			"package":   map[string]any{"name": n.Name, "version": n.Version, "ecosystem": string(n.Ecosystem)},
@@ -362,14 +366,14 @@ func (a *Analyzer) findings(ctx context.Context, req sdk.AnalyzeRequest, g *deps
 	return out
 }
 
-func (a *Analyzer) remediations(ctx context.Context, req sdk.AnalyzeRequest, n deps.Node, pkg string, fixed deps.Version, hasFix bool,
+func (a *Analyzer) remediations(ctx context.Context, req sdk.AnalyzeRequest, g *deps.Graph, n deps.Node, pkg string, fixed deps.Version, hasFix bool,
 	up probe, registry deps.VersionRegistry) []sdk.Remediation {
 	if !hasFix {
 		return nil
 	}
 	group := "security/" + n.Name
 	if n.Direct {
-		return []sdk.Remediation{{Description: fmt.Sprintf("upgrade %s %s → %s", n.Name, n.Version, fixed), Group: group,
+		return []sdk.Remediation{{Description: fmt.Sprintf("upgrade %s %s → %s", n.Name, n.Version, fixed), Group: group, Affects: g.Affected(n.ID),
 			Package: &sdk.PackageChange{PURL: pkg, From: n.Version, To: fixed.String(), Reason: "fixes vulnerabilities"}}}
 	}
 	var out []sdk.Remediation
@@ -380,19 +384,20 @@ func (a *Analyzer) remediations(ctx context.Context, req sdk.AnalyzeRequest, n d
 		// The published dependencies say which ancestor version brings the
 		// fix; deepward fix still verifies it against the whole project.
 		out = append(out, sdk.Remediation{Description: fmt.Sprintf("upgrade %s %s → %s to bring %s %s", anc.Name, anc.Version, up.to, n.Name, up.brings),
-			Group: group, Package: &sdk.PackageChange{PURL: withoutVersion(anc.ID), From: anc.Version, To: up.to, Reason: "brings a fixed " + n.Name}})
+			Group: group, Affects: g.Affected(anc.ID),
+			Package: &sdk.PackageChange{PURL: withoutVersion(anc.ID), From: anc.Version, To: up.to, Reason: "brings a fixed " + n.Name}})
 	case up.outcome == outcomeUnknown && registry != nil && a.cfg.MaxCandidates > 0:
 		// Unknown: offer the next releases for deepward fix to try.
-		out = append(out, a.blindCandidates(ctx, req, anc, n, fixed, group, registry)...)
+		out = append(out, a.blindCandidates(ctx, req, g, anc, n, fixed, group, registry)...)
 	}
-	out = append(out, sdk.Remediation{Description: fmt.Sprintf("pin transitive %s %s → %s", n.Name, n.Version, fixed), Group: group,
-		Package: &sdk.PackageChange{PURL: pkg, From: n.Version, To: fixed.String(), Pin: true, Reason: "fixes vulnerabilities"}})
+	out = append(out, sdk.Remediation{Description: fmt.Sprintf("pin transitive %s %s → %s", n.Name, n.Version, fixed), Group: group, Affects: g.Affected(n.ID),
+		Package: &sdk.PackageChange{PURL: pkg, From: n.Version, To: fixed.String(), Pin: true, Reason: "fixes vulnerabilities", Targets: pinTargets(g, n.ID)}})
 	return out
 }
 
 // blindCandidates lists the next releases of the ancestor, for when what they
 // bring could not be checked.
-func (a *Analyzer) blindCandidates(ctx context.Context, req sdk.AnalyzeRequest, anc, n deps.Node, fixed deps.Version, group string,
+func (a *Analyzer) blindCandidates(ctx context.Context, req sdk.AnalyzeRequest, g *deps.Graph, anc, n deps.Node, fixed deps.Version, group string,
 	registry deps.VersionRegistry) []sdk.Remediation {
 	cur, err := deps.ParseVersion(anc.Ecosystem, anc.Version)
 	if err != nil {
@@ -411,9 +416,10 @@ func (a *Analyzer) blindCandidates(ctx context.Context, req sdk.AnalyzeRequest, 
 		cands = cands[:a.cfg.MaxCandidates]
 	}
 	var out []sdk.Remediation
+	affects := g.Affected(anc.ID)
 	for _, c := range cands {
 		out = append(out, sdk.Remediation{Description: fmt.Sprintf("upgrade %s %s → %s to bring %s ≥ %s", anc.Name, anc.Version, c, n.Name, fixed),
-			Group: group, Package: &sdk.PackageChange{PURL: ancPkg, From: anc.Version, To: c.String(), Reason: "brings a fixed " + n.Name}})
+			Group: group, Affects: affects, Package: &sdk.PackageChange{PURL: ancPkg, From: anc.Version, To: c.String(), Reason: "brings a fixed " + n.Name}})
 	}
 	return out
 }
@@ -522,8 +528,9 @@ func references(g domain.Group) []sdk.Reference {
 }
 
 // manifestLocation finds the manifest line that declares a dependency (best
-// effort: the first line mentioning the artifact name).
-func manifestLocation(req sdk.AnalyzeRequest, declaring deps.Node) *sdk.FileLocation {
+// effort: the first line mentioning the artifact name), searching the
+// preferred manifests (the declaring module's) first.
+func manifestLocation(req sdk.AnalyzeRequest, declaring deps.Node, preferred ...string) *sdk.FileLocation {
 	if len(req.Project.Manifests) == 0 {
 		return &sdk.FileLocation{Path: req.Project.Dir}
 	}
@@ -535,7 +542,7 @@ func manifestLocation(req sdk.AnalyzeRequest, declaring deps.Node) *sdk.FileLoca
 		needle = base
 	}
 	if req.Workspace != nil && req.Workspace.FS != nil && needle != "" {
-		for _, m := range req.Project.Manifests {
+		for _, m := range append(append([]string{}, preferred...), req.Project.Manifests...) {
 			data, err := fs.ReadFile(req.Workspace.FS, m)
 			if err != nil {
 				continue
@@ -551,4 +558,16 @@ func manifestLocation(req sdk.AnalyzeRequest, declaring deps.Node) *sdk.FileLoca
 		}
 	}
 	return &sdk.FileLocation{Path: req.Project.Manifests[0]}
+}
+
+// pinTargets lists the manifests of the modules through which a package
+// enters the project: a pin there reaches every module that depends on them.
+func pinTargets(g *deps.Graph, id string) []string {
+	var out []string
+	for _, m := range g.EntryModules(id) {
+		if n, ok := g.Node(m); ok && n.Attributes["manifest"] != "" {
+			out = append(out, n.Attributes["manifest"])
+		}
+	}
+	return out
 }
