@@ -177,7 +177,7 @@ plugins:
 	}
 	html := string(read("deepward-report.html"))
 	for _, sev := range []sdk.Severity{sdk.SeverityCritical, sdk.SeverityHigh, sdk.SeverityMedium, sdk.SeverityLow} {
-		m := regexp.MustCompile(`data-summary="` + string(sev) + `"><div class="num">(\d+)</div>`).FindStringSubmatch(html)
+		m := regexp.MustCompile(`data-summary="` + string(sev) + `"><span class="num">(\d+)</span>`).FindStringSubmatch(html)
 		if m == nil {
 			t.Fatalf("HTML lacks the %s card", sev)
 		}

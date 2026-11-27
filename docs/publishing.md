@@ -17,23 +17,54 @@
    the shared `val`, for NuGet the `PackageReference`, `$(Property)` or
    `Directory.Packages.props`. Formatting and comments stay untouched. For
    npm, Yarn, pnpm, Go and Cargo the package manager then updates the
-   lockfile (see the [ecosystem docs](ecosystems)).
+   lockfile (see the [ecosystem docs](ecosystems)). Then the
+   `fix.postTasks` commands run in the copy, for example to regenerate code
+   or checksums that depend on versions; their output joins the change.
 4. **Verify** by rebuilding the graph on the edited copy and running the same
    analyzers. A change is kept only if the targeted findings are gone and the
-   build still works. For a vulnerable transitive dependency, Deepward first
-   tries newer versions of the direct dependency that brings it in, in
-   ascending order. If none of them fixes it, Deepward pins the transitive
-   version (Maven `dependencyManagement`, NuGet CPM or `PackageReference`,
-   npm `overrides`, pnpm `pnpm.overrides`, Yarn `resolutions`, `go get`,
-   `cargo update --precise`). For sbt it prints a ready-to-paste
-   `dependencyOverrides` line instead.
+   build still works. For a vulnerable transitive dependency there are two
+   ways: pin the transitive version (Maven `dependencyManagement`, NuGet CPM
+   or `PackageReference`, npm `overrides`, pnpm `pnpm.overrides`, Yarn
+   `resolutions`, `go get`, `cargo update --precise`), or upgrade the direct
+   dependency that brings it in to a version that brings a fixed one.
+   `fix.transitive` decides which comes first: `upgrade` (the default) or
+   `pin`; the other is tried when the first does not pass verification.
+   For sbt Deepward prints a ready-to-paste `dependencyOverrides` line
+   instead of a pin.
 5. **Report**: without `--publish`, Deepward prints a unified diff per change
    request and writes nothing. With `--publish`, it creates or updates merge
    or pull requests.
 
 Changes that cannot be made automatically are listed as `manual`, with the
 reason and, where possible, a suggestion. Edits that do not pass
-verification are listed as `verification-failed`.
+verification are listed as `verification-failed` in the summary and logged
+as warnings (`change rejected`), with the reason.
+
+### Unverified changes
+
+"Verification failed" means Deepward still sees the advisory after the
+change, not that the change is useless: a `dependencyManagement` pin may not
+reach every path, the advisory may be about another artifact or a wider
+version range than what is on the classpath, or another dependency may bring
+the package again. With
+
+```yaml
+fix:
+  unverified:
+    publish: true
+```
+
+Deepward opens a request for such changes too, as long as the project still
+builds with them. It takes the first such alternative in the order of
+preference (`fix.transitive`), titles the request
+`Deepward: [unverified] …`, adds the `deepward-unverified` label
+(`fix.unverified.labels`), and starts the description with a warning, the
+reason for every unverified change and a command that shows where the
+package comes from (for Maven `mvn dependency:tree -Dverbose -Dincludes=…`).
+These requests are candidates for a person to review: do not merge them
+automatically. When a later run verifies the change, the same request is
+updated and loses the marking. Changes that break the build or whose post
+tasks fail are never published.
 
 ## Behavior on the platform
 
@@ -66,7 +97,9 @@ verification are listed as `verification-failed`.
   not ship. They come after all other requests and never bypass the limit,
   whatever their severity.
 - **Labels**: `fix.labels` (default `dependencies`), plus
-  `fix.securityLabels` (default `security`) for vulnerability fixes.
+  `fix.securityLabels` (default `security`) for vulnerability fixes, plus
+  `fix.unverified.labels` (default `deepward-unverified`) for unverified
+  changes.
 - The description has a change table, the fixed advisories with links and
   severity, release notes when known, and a hidden metadata marker.
 

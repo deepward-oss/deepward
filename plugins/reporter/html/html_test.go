@@ -72,11 +72,11 @@ func TestContent(t *testing.T) {
 	res := sdktest.SampleResult()
 	out := render(t, res)
 	for _, want := range []string{
-		`data-summary="critical"><div class="num">1</div>`, `data-summary="high"><div class="num">2</div>`,
-		"Vulnerabilities <span class=\"count\" data-count-for=\"vulns\">3</span>", "Outdated dependencies", "Code issue findings",
+		`data-summary="critical"><span class="num">1</span>`, `data-summary="high"><span class="num">2</span>`,
+		"<h2>Vulnerabilities</h2><span class=\"count\" data-count-for=\"vulns\">3</span>", "Outdated dependencies", "Code issue findings",
 		"java.lang.security.audit.xxe", "core/src/main/java/Parser.java:42", "semgrep",
 		"tool-not-found: sbt", "error NU1101", "plugin panicked: boom", "SnakeYAML Constructor is not used", "2027-01-01",
-		"org.springframework.boot:spring-boot-starter-web@2.5.0 → com.fasterxml.jackson.core:jackson-databind@2.12.1",
+		`<span class="hop">org.springframework.boot:spring-boot-starter-web<span class="faint">@2.5.0</span></span><span class="sep">→</span><span class="target">com.fasterxml.jackson.core:jackson-databind<span class="faint">@2.12.1</span></span>`,
 		"Vulnerability data: <strong>ghsa</strong> (CC-BY-4.0", "Quality gate", "failed", "no fix", "core/pom.xml:14",
 		`data-project="maven:."`, `data-direct="transitive"`, `<option value="sbt">sbt</option>`,
 	} {
@@ -145,10 +145,10 @@ func TestNotBuiltSection(t *testing.T) {
 	res.ComputeSummary()
 	out := render(t, res)
 	for _, want := range []string{
-		`<section id="not-built" class="notbuilt">`, `data-count-for="vulns-notbuilt">1</span>`, `data-built="not-built"`,
-		`<span class="badge notbuilt"`, `data-summary-notbuilt><div class="num">1</div>`,
-		`data-summary="critical"><div class="num">0</div>`, `data-count-for="vulns">2</span>`,
-		"not compiled into it", `<select id="f-built">`, "Findings in packages that are not built do not count.",
+		`<section class="panel notbuilt" id="not-built">`, `data-count-for="vulns-notbuilt">1</span>`, `data-built="not-built"`,
+		`<span class="tag notbuilt"`, `data-summary-notbuilt><span class="num">1</span>`,
+		`data-summary="critical"><span class="num">0</span>`, `data-count-for="vulns">2</span>`,
+		"not compiled into it", `<select id="f-built"`, "findings in packages that are not built do not count toward the gate",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q", want)
@@ -176,20 +176,47 @@ func TestAdvisoriesOfOnePackageShareARow(t *testing.T) {
 	res.Findings = append(res.Findings, second)
 	res.ComputeSummary()
 	out := render(t, res)
-	if got := strings.Count(out, "<code>org.apache.logging.log4j:log4j-core</code>"); got != 1 {
+	if got := strings.Count(out, `<span class="ns">org.apache.logging.log4j:</span><span class="name">log4j-core</span>`); got != 1 {
 		t.Errorf("log4j-core rows: %d, want one row for both advisories", got)
 	}
 	for _, want := range []string{
-		`data-severity="critical" data-findings="critical high"`, "2 advisories</button>", "CVE-2021-44228, CVE-2021-45046",
+		`data-severity="critical" data-findings="critical high"`, `</span>2 <span class="muted">advisories</span>`, `title="CVE-2021-44228, CVE-2021-45046"`,
 		"Incomplete fix", "&gt;=2.0-beta9, &lt;2.16.0", "4 advisories in 3 package version(s)",
-		`data-count-for="vulns">3</span>`, `data-summary="high"><div class="num">3</div>`,
+		`data-count-for="vulns">3</span>`, `data-summary="high"><span class="num">3</span>`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report lacks %q", want)
 		}
 	}
 	// The highest severity comes first inside the row.
-	if strings.Index(out, "<code>CVE-2021-44228</code>") > strings.Index(out, "<code>CVE-2021-45046</code>") {
+	if strings.Index(out, ">CVE-2021-44228</a>") > strings.Index(out, ">CVE-2021-45046</a>") {
 		t.Error("advisories are ordered by severity")
+	}
+}
+
+func TestHelpersForLayout(t *testing.T) {
+	for in, want := range map[string][2]string{
+		"org.x:lib": {"org.x:", "lib"}, "@scope/pkg": {"@scope/", "pkg"}, "github.com/a/b": {"github.com/a/", "b"},
+		"lodash": {"", "lodash"}, "trailing:": {"", "trailing:"},
+	} {
+		if ns, n := pkgSplit(in); ns != want[0] || n != want[1] {
+			t.Errorf("pkgSplit(%q) = %q %q", in, ns, n)
+		}
+	}
+	for in, want := range map[string]string{"critical": "crit", "high": "high", "medium": "med", "low": "low", "unknown": "unkn", "none": "none"} {
+		if sevShort(in) != want {
+			t.Errorf("sevShort(%q)", in)
+		}
+	}
+	if shortSHA("0123456789abcdef") != "0123456789ab" || shortSHA("abc") != "abc" {
+		t.Error("shortSHA")
+	}
+	if advisoryURL(vulnRow{ID: "X-1"}) != "https://osv.dev/vulnerability/X-1" ||
+		advisoryURL(vulnRow{ID: "X-1", References: []sdk.Reference{{URL: "https://example.com/a"}}}) != "https://example.com/a" ||
+		advisoryURL(vulnRow{ID: "X-1", References: []sdk.Reference{{URL: "https://example.com/a"}, {URL: "https://osv.dev/vulnerability/X-1"}}}) != "https://osv.dev/vulnerability/X-1" {
+		t.Error("advisoryURL")
+	}
+	if h := hopOf("not a purl", true); h.Name != "not a purl" || !h.Target {
+		t.Errorf("hopOf: %+v", h)
 	}
 }

@@ -124,6 +124,7 @@ fix:
   minSeverity: high             # fix only findings at or above this severity
   kinds: [vulnerability]        # fix only these finding kinds (default: all)
   concurrency: 2                # change groups verified in parallel
+  transitive: upgrade           # upgrade or pin: what is tried first for transitive vulnerabilities
   groups:
     - name: jackson
       match: ["pkg:maven/com.fasterxml.jackson*/*"]
@@ -161,6 +162,64 @@ fix:
 
 Open requests of the findings that are left out are neither updated nor
 closed: they stay as they are until you close them or widen the filters.
+
+### Transitive vulnerabilities
+
+A vulnerable transitive dependency can be fixed by pinning its version or by
+upgrading the direct dependency that brings it in. `transitive` decides
+which Deepward tries first:
+
+- `upgrade` (default): upgrade the direct dependency to the oldest release
+  that brings a fixed version. No pin to maintain, but a bigger change.
+- `pin`: pin the fixed version (Maven `dependencyManagement` in the root
+  POM, npm `overrides`, ...). One small change, independent of whether the
+  direct dependency has a release with the fix.
+
+The other one is tried when the first does not pass verification.
+
+### Post tasks
+
+Like Renovate's `postUpgradeTasks`, `postTasks` run in the copy of the
+project after each change is applied and before it is verified, so the
+change request can carry files that depend on dependency versions:
+generated code, checksums, lockfiles of other tools.
+
+```yaml
+fix:
+  postTasks:
+    - tool: mvn                       # resolved like setup steps
+      args: [-q, generate-sources]
+      dir: .                          # relative to the project directory
+      env: {MAVEN_OPTS: -Xmx1g}
+      files: ["**/src/main/generated/**", "**/*.sha256"]
+      ecosystems: [maven]             # optional: only these ecosystems
+      projects: [services/api]        # optional: only these project directories
+```
+
+- `files` are globs relative to the repository root (`**` matches any
+  number of directories). Changes to other files, including deletions, are
+  undone; without `files` every change outside excluded directories such as
+  `target/` is kept.
+- A task that fails rejects the change, like a failed verification, with the
+  command and the last line of its output as the reason.
+- The tasks run for every alternative Deepward tries, so they should be
+  quick; their commands are listed in the change request.
+- The commands come from `deepward.yaml` in the repository and run with the
+  rights of the CI job, the same as setup steps.
+
+### Unverified changes
+
+```yaml
+fix:
+  unverified:
+    publish: true                     # default false
+    labels: [deepward-unverified]
+```
+
+By default a change after which the targeted findings are still reported
+gets no request and is listed as `verification-failed`. With `publish`, it
+gets a request marked `[unverified]` with a warning and the reason; see
+[publishing.md](publishing.md#unverified-changes).
 
 ### Speed
 

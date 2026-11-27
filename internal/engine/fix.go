@@ -2,20 +2,14 @@ package engine
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
 
-	"github.com/deepward-oss/deepward/internal/textedit"
 	"github.com/deepward-oss/deepward/pkg/sdk"
 	"github.com/deepward-oss/deepward/pkg/sdk/purl"
 )
@@ -35,6 +29,13 @@ type FixItem struct {
 	// Upgrade is set when a security fix also takes the package to the
 	// version an update proposed, so no separate update request is needed.
 	Upgrade bool `json:"upgrade,omitempty"`
+	// Unverified is set when the project still builds with the change but
+	// the targeted findings are still reported (fix.unverified.publish).
+	Unverified bool `json:"unverified,omitempty"`
+	// VerifyFailure says why verification failed.
+	VerifyFailure string `json:"verifyFailure,omitempty"`
+	// Tasks are the post tasks that ran after the change.
+	Tasks []string `json:"tasks,omitempty"`
 }
 
 // ChangeSet is a verified set of edits for one project and group: the
@@ -54,8 +55,10 @@ type ChangeSet struct {
 	Urgent bool `json:"urgent"`
 	// NotBuilt is set when every finding of the change is in code that is
 	// not built.
-	NotBuilt bool     `json:"notBuilt"`
-	Labels   []string `json:"labels"`
+	NotBuilt bool `json:"notBuilt"`
+	// Unverified is set when an item of the change failed verification.
+	Unverified bool     `json:"unverified"`
+	Labels     []string `json:"labels"`
 }
 
 // ManualFix is a finding that needs a human.
@@ -233,6 +236,24 @@ func (e *Engine) fixGroupIn(ctx context.Context, copies map[string]*scratch, g *
 	return o
 }
 
+// ordered sorts the alternatives of a finding by fix.transitive: with
+// "upgrade" (the default) upgrades of the direct dependencies that bring a
+// transitive package come first, with "pin" pins of its version. The order
+// inside each kind is kept.
+func (e *Engine) ordered(alts []sdk.Remediation) []sdk.Remediation {
+	pinFirst := e.cfg.Fix.Transitive == TransitivePin
+	isPin := func(r sdk.Remediation) bool { return r.Package != nil && r.Package.Pin }
+	out := make([]sdk.Remediation, 0, len(alts))
+	for _, first := range []bool{true, false} {
+		for _, r := range alts {
+			if (isPin(r) == pinFirst) == first {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
+}
+
 // fixable reports whether a finding passes fix.kinds and fix.minSeverity.
 func (e *Engine) fixable(f sdk.Finding) bool {
 	if kinds := e.cfg.Fix.Kinds; len(kinds) > 0 {
@@ -330,10 +351,11 @@ func (e *Engine) groups(res *sdk.ScanResult, projects map[string]sdk.Project) ([
 			byKey[key] = g
 			order = append(order, key)
 		}
-		tk := key + "\x00" + altKey(f.Remediations)
+		alts := e.ordered(f.Remediations)
+		tk := key + "\x00" + altKey(alts)
 		t, ok := targets[tk]
 		if !ok {
-			t = &target{alternatives: f.Remediations}
+			t = &target{alternatives: alts}
 			targets[tk] = t
 			g.targets = append(g.targets, t)
 		}
@@ -408,135 +430,6 @@ func mergeUpdates(groups []*fixGroup) []*fixGroup {
 	return out
 }
 
-// scratch is a private copy of the files a project needs.
-type scratch struct {
-	ws       *sdk.Workspace
-	original map[string][]byte
-	// touched lists the files edited since the copy was made or reset.
-	touched map[string]bool
-	// cache holds verification scans by project, file contents and analyzers.
-	cache map[string]*sdk.ScanResult
-}
-
-func (e *Engine) newScratch(p sdk.Project) (*scratch, error) {
-	dir, err := os.MkdirTemp("", "deepward-fix-")
-	if err != nil {
-		return nil, err
-	}
-	sc := &scratch{ws: sdk.NewWorkspace(dir, e.ws.Exclude), original: map[string][]byte{}, touched: map[string]bool{},
-		cache: map[string]*sdk.ScanResult{}}
-	copyFile := func(rel string) error {
-		data, err := fs.ReadFile(e.ws.FS, rel)
-		if err != nil {
-			return err
-		}
-		dst := filepath.Join(dir, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		sc.original[rel] = data
-		return os.WriteFile(dst, data, 0o644)
-	}
-	root := path.Clean(p.Dir)
-	err = fs.WalkDir(e.ws.FS, root, func(rel string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if rel != root && e.ws.IsExcluded(rel) {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !d.Type().IsRegular() {
-			return nil
-		}
-		return copyFile(rel)
-	})
-	if err == nil {
-		for _, m := range p.Manifests {
-			if _, done := sc.original[m]; !done {
-				if err = copyFile(m); err != nil {
-					break
-				}
-			}
-		}
-	}
-	if err != nil {
-		sc.close()
-		return nil, fmt.Errorf("copy project %s: %w", p.ID, err)
-	}
-	return sc, nil
-}
-
-func (s *scratch) close() { _ = os.RemoveAll(s.ws.Root) }
-
-// reset restores the files edited since the copy was made, so the copy can
-// serve the next group of the same project.
-func (s *scratch) reset() error {
-	for f := range s.touched {
-		if err := s.write(f, s.original[f]); err != nil {
-			return fmt.Errorf("restore %s: %w", f, err)
-		}
-	}
-	s.touched = map[string]bool{}
-	return nil
-}
-
-func (s *scratch) read(rel string) ([]byte, error) {
-	return os.ReadFile(filepath.Join(s.ws.Root, filepath.FromSlash(rel)))
-}
-
-func (s *scratch) write(rel string, data []byte) error {
-	dst := filepath.Join(s.ws.Root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0o644)
-}
-
-// apply applies edits and returns the previous contents for rollback.
-func (s *scratch) apply(edits []sdk.TextEdit) (map[string][]byte, error) {
-	prev := map[string][]byte{}
-	for file, es := range textedit.ByFile(edits) {
-		cur, err := s.read(file)
-		if err != nil {
-			return prev, err
-		}
-		next, err := textedit.Apply(cur, es)
-		if err != nil {
-			return prev, err
-		}
-		prev[file] = cur
-		s.touched[file] = true
-		if err := s.write(file, next); err != nil {
-			return prev, err
-		}
-	}
-	return prev, nil
-}
-
-func (s *scratch) rollback(prev map[string][]byte) {
-	for file, data := range prev {
-		_ = s.write(file, data)
-	}
-}
-
-func (s *scratch) hash() string {
-	h := sha256.New()
-	files := make([]string, 0, len(s.original))
-	for f := range s.original {
-		files = append(files, f)
-	}
-	sort.Strings(files)
-	for _, f := range files {
-		data, _ := s.read(f)
-		h.Write([]byte(f))
-		h.Write(data)
-	}
-	return hex.EncodeToString(h.Sum(nil))
-}
-
 func (e *Engine) realize(ctx context.Context, sc *scratch, p sdk.Project, r sdk.Remediation) ([]sdk.TextEdit, *sdk.ManualChange) {
 	if len(r.TextEdits) > 0 {
 		return r.TextEdits, nil
@@ -564,9 +457,19 @@ func (e *Engine) realize(ctx context.Context, sc *scratch, p sdk.Project, r sdk.
 	return out.Edits, nil
 }
 
+// verdict is the outcome of verifying a change.
+type verdict struct {
+	ok  bool
+	why string
+	// remaining is set when the project builds but targeted findings are
+	// still reported: the change may still help, so it can be published as
+	// unverified.
+	remaining bool
+}
+
 // verify rescans the scratch copy and reports whether the targeted findings
 // are gone and the project still builds.
-func (e *Engine) verify(ctx context.Context, sc *scratch, p sdk.Project, findings []sdk.Finding) (bool, string, error) {
+func (e *Engine) verify(ctx context.Context, sc *scratch, p sdk.Project, findings []sdk.Finding) (verdict, error) {
 	analyzers := map[string]bool{}
 	for _, f := range findings {
 		analyzers[f.Analyzer] = true
@@ -582,25 +485,33 @@ func (e *Engine) verify(ctx context.Context, sc *scratch, p sdk.Project, finding
 		var err error
 		res, err = e.ScanWorkspace(withoutProgress(ctx), sc.ws, ScanFilter{Projects: []string{p.ID}, Analyzers: ids})
 		if err != nil {
-			return false, "", err
+			return verdict{}, err
 		}
 		sc.cache[key] = res
 	}
 	for _, pr := range res.Projects {
 		if pr.ID == p.ID && pr.Status != sdk.ProjectOK {
-			return false, "the project no longer builds: " + pr.Reason, nil
+			return verdict{why: "the project no longer builds: " + pr.Reason}, nil
 		}
 	}
 	remaining := map[string]bool{}
 	for _, f := range res.Findings {
 		remaining[f.Fingerprint] = true
 	}
+	var still []string
 	for _, f := range findings {
-		if remaining[f.Fingerprint] {
-			return false, f.Rule + " is still reported after the change", nil
+		if remaining[f.Fingerprint] && !contains(still, f.Rule) {
+			still = append(still, f.Rule)
 		}
 	}
-	return true, "", nil
+	if len(still) > 0 {
+		verb := "is"
+		if len(still) > 1 {
+			verb = "are"
+		}
+		return verdict{why: strings.Join(still, ", ") + " " + verb + " still reported after the change", remaining: true}, nil
+	}
+	return verdict{ok: true}, nil
 }
 
 func (e *Engine) fixGroup(ctx context.Context, sc *scratch, g *fixGroup) (*ChangeSet, []ManualFix, []FailedFix, error) {
@@ -639,67 +550,104 @@ func (e *Engine) fixGroup(ctx context.Context, sc *scratch, g *fixGroup) (*Chang
 	if len(cs.Items) == 0 {
 		return nil, manual, failed, nil
 	}
-	files := make([]string, 0, len(sc.original))
-	for f := range sc.original {
-		files = append(files, f)
-	}
-	sort.Strings(files)
-	var diff strings.Builder
-	for _, f := range files {
-		cur, err := sc.read(f)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if string(cur) != string(sc.original[f]) {
-			cs.Files = append(cs.Files, sdk.FileChange{Path: f, Content: cur})
-			diff.WriteString(textedit.Unified(f, sc.original[f], cur))
-		}
-	}
+	cs.Files, cs.Diff = sc.changes()
 	if len(cs.Files) == 0 {
 		return nil, manual, append(failed, FailedFix{Project: g.project.ID, Group: g.name, Rule: g.targets[0].findings[0].Rule,
 			Reason: "verification-failed: the change touched no file"}), nil
 	}
-	cs.Diff = diff.String()
 	e.describe(cs)
 	return cs, manual, failed, nil
 }
 
 // attempt applies the first alternative that clears every finding and keeps
 // the project building. Without one, it returns the last manual change or
-// verification failure.
+// verification failure; with fix.unverified.publish, the first alternative
+// (in the order of preference) that kept the project building is applied
+// again and returned marked unverified.
 func (e *Engine) attempt(ctx context.Context, sc *scratch, p sdk.Project, alternatives []sdk.Remediation,
 	findings []sdk.Finding) (*FixItem, *sdk.ManualChange, string, error) {
 	var lastManual *sdk.ManualChange
 	var lastFailure string
+	var candidate *sdk.Remediation
+	var candidateWhy string
 	for _, alt := range alternatives {
-		edits, m := e.realize(ctx, sc, p, alt)
+		start := e.clock.Now()
+		e.progress(ctx, "verifying change", "project", p.ID, "change", alt.Description)
+		tasks, v, m, err := e.try(ctx, sc, p, alt, findings)
+		if err != nil {
+			return nil, nil, "", err
+		}
 		if m != nil {
 			lastManual = m
 			continue
 		}
-		prev, err := sc.apply(edits)
-		if err != nil {
-			sc.rollback(prev)
-			lastFailure = err.Error()
-			continue
-		}
-		start := e.clock.Now()
-		e.progress(ctx, "verifying change", "project", p.ID, "change", alt.Description)
-		ok, why, err := e.verify(ctx, sc, p, findings)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		if !ok {
-			sc.rollback(prev)
-			lastFailure = why
-			e.progress(ctx, "change rejected", "project", p.ID, "change", alt.Description, "reason", why, "duration", e.since(start))
+		if !v.ok {
+			lastFailure = v.why
+			if v.remaining && candidate == nil {
+				a := alt
+				candidate, candidateWhy = &a, v.why
+			}
+			e.log.WarnContext(ctx, "change rejected", "project", p.ID, "change", alt.Description, "reason", v.why, "duration", e.since(start))
 			continue
 		}
 		e.progress(ctx, "change verified", "project", p.ID, "change", alt.Description, "duration", e.since(start))
 		it := itemFor(alt, findings)
+		it.Tasks = tasks
 		return &it, nil, "", nil
 	}
-	return nil, lastManual, lastFailure, nil
+	if candidate == nil || !e.cfg.Fix.Unverified.Publish {
+		return nil, lastManual, lastFailure, nil
+	}
+	// Apply the candidate again (without verifying it) to publish it.
+	edits, m := e.realize(ctx, sc, p, *candidate)
+	if m != nil {
+		return nil, m, lastFailure, nil
+	}
+	prev, err := sc.apply(edits)
+	if err != nil {
+		sc.rollback(prev)
+		return nil, nil, lastFailure, nil
+	}
+	tasks, err := e.runPostTasks(ctx, sc, p, prev)
+	if err != nil {
+		sc.rollback(prev)
+		return nil, nil, lastFailure, nil
+	}
+	e.log.WarnContext(ctx, "publishing unverified change", "project", p.ID, "change", candidate.Description, "reason", candidateWhy)
+	it := itemFor(*candidate, findings)
+	it.Unverified, it.VerifyFailure, it.Tasks = true, candidateWhy, tasks
+	return &it, nil, "", nil
+}
+
+// try applies one alternative, runs the post tasks and verifies the result.
+// A rejected change is rolled back.
+func (e *Engine) try(ctx context.Context, sc *scratch, p sdk.Project, alt sdk.Remediation,
+	findings []sdk.Finding) ([]string, verdict, *sdk.ManualChange, error) {
+	edits, m := e.realize(ctx, sc, p, alt)
+	if m != nil {
+		return nil, verdict{}, m, nil
+	}
+	prev, err := sc.apply(edits)
+	if err != nil {
+		sc.rollback(prev)
+		return nil, verdict{why: err.Error()}, nil, nil
+	}
+	tasks, err := e.runPostTasks(ctx, sc, p, prev)
+	if err != nil {
+		sc.rollback(prev)
+		if ctx.Err() != nil {
+			return nil, verdict{}, nil, ctx.Err()
+		}
+		return nil, verdict{why: err.Error()}, nil, nil
+	}
+	v, err := e.verify(ctx, sc, p, findings)
+	if err != nil {
+		return nil, verdict{}, nil, err
+	}
+	if !v.ok {
+		sc.rollback(prev)
+	}
+	return tasks, v, nil, nil
 }
 
 // report records a finding that could not be fixed automatically.
@@ -785,7 +733,20 @@ func (e *Engine) describe(cs *ChangeSet) {
 		}
 		cs.Labels = append(cs.Labels, sec...)
 	}
+	for _, it := range cs.Items {
+		cs.Unverified = cs.Unverified || it.Unverified
+	}
+	if cs.Unverified {
+		un := e.cfg.Fix.Unverified.Labels
+		if un == nil {
+			un = DefaultUnverifiedLabels
+		}
+		cs.Labels = append(cs.Labels, un...)
+	}
 	cs.Title = "Deepward: " + e.titleText(cs)
+	if cs.Unverified {
+		cs.Title = "Deepward: [unverified] " + e.titleText(cs)
+	}
 	if cs.Project.Dir != "." && cs.Project.Dir != "" {
 		cs.Title += " in " + cs.Project.Dir
 	}

@@ -37,7 +37,7 @@ type vulnRow struct {
 	Score          string
 	Vector         string
 	Affected       []string
-	Paths          []string
+	Chains         [][]hop
 	Recommendation string
 	References     []sdk.Reference
 	Location       string
@@ -62,11 +62,13 @@ type vulnGroup struct {
 	Scope          string
 	FixedIn        string
 	NoFix          bool
-	Paths          []string
+	Chains         [][]hop
 	Recommendation string
 	Location       string
 	NotBuilt       bool
 	Search         string
+	// Score is the CVSS score of the most severe advisory.
+	Score string
 	// Findings lists the severity of every advisory, for filters and counts.
 	Findings   string
 	Advisories []vulnRow
@@ -94,7 +96,7 @@ func groupVulns(rows []vulnRow) []vulnGroup {
 			i = len(out)
 			index[k] = i
 			out = append(out, vulnGroup{Package: r.Package, Version: r.Version, Project: r.Project, Ecosystem: r.Ecosystem, Direct: r.Direct,
-				Scope: r.Scope, FixedIn: r.FixedIn, NoFix: r.NoFix, Paths: r.Paths, Recommendation: r.Recommendation, Location: r.Location,
+				Scope: r.Scope, FixedIn: r.FixedIn, NoFix: r.NoFix, Chains: r.Chains, Recommendation: r.Recommendation, Location: r.Location,
 				NotBuilt: r.NotBuilt, Rank: -1})
 		}
 		g := &out[i]
@@ -120,10 +122,27 @@ func groupVulns(rows []vulnRow) []vulnGroup {
 			sevs = append(sevs, a.Severity)
 			search = append(search, a.Search)
 		}
+		// The score shown next to the severity is that of the top advisory.
+		g.Score = g.Advisories[0].Score
 		g.Findings = strings.Join(sevs, " ")
 		g.Search = strings.Join(search, " ")
 	}
 	return out
+}
+
+// hop is one package on a dependency path.
+type hop struct {
+	Name, Version string
+	// Target marks the vulnerable package at the end of the path.
+	Target bool
+}
+
+func hopOf(id string, target bool) hop {
+	p, err := purl.Parse(id)
+	if err != nil {
+		return hop{Name: id, Target: target}
+	}
+	return hop{Name: p.Coordinates(), Version: p.Version, Target: target}
 }
 
 func firstNonEmpty(vs ...string) string {
@@ -352,14 +371,15 @@ func vulnRowOf(f sdk.Finding) vulnRow {
 	if p := f.PrimaryPackage(); p != nil {
 		r.Direct, r.Scope = p.Direct, p.Scope
 		if r.Package == "" {
-			r.Package = short(p.PURL)
+			h := hopOf(p.PURL, false)
+			r.Package, r.Version = h.Name, firstNonEmpty(r.Version, h.Version)
 		}
 		for _, path := range p.Paths {
-			names := make([]string, 0, len(path))
-			for _, id := range path {
-				names = append(names, short(id))
+			chain := make([]hop, 0, len(path))
+			for i, id := range path {
+				chain = append(chain, hopOf(id, i == len(path)-1))
 			}
-			r.Paths = append(r.Paths, strings.Join(names, " → "))
+			r.Chains = append(r.Chains, chain)
 		}
 	}
 	r.FixedIn = str(props, "fixedIn")

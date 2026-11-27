@@ -23,6 +23,10 @@ The HTML report SHALL contain a summary (finding counts by severity, by project,
 - **WHEN** 2 critical, 5 high and 1 medium findings exist
 - **THEN** the report header shows these counts and they match the advisories in the vulnerability table per severity
 
+#### Scenario: Compact layout
+- **WHEN** the report lists packages with long names and versions
+- **THEN** the tables keep fixed column widths, package names, versions and advisory IDs are set in a monospace font without wrapping (the full text is in the tooltip), the package namespace is muted and its own name emphasized, severities are fixed-width labels, and each dependency path is a chain of packages ending in the vulnerable one, highlighted
+
 #### Scenario: Advisories of one package version
 - **WHEN** three advisories affect `lz4-java 1.11.2` in one project
 - **THEN** the HTML vulnerability table shows one row for `lz4-java 1.11.2` with the highest severity, the three advisory IDs, one fixed version and one recommended action, and the expanded row lists each advisory with its own severity, details and references; the severity filter matches the row if any of its advisories has that severity, and JSON and SARIF keep one finding per advisory

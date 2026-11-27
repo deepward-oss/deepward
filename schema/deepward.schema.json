@@ -168,6 +168,51 @@
           ],
           "type": "string"
         },
+        "postTasks": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "args": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "dir": {
+                "type": "string"
+              },
+              "ecosystems": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "env": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "files": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "projects": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tool": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
         "securityLabels": {
           "items": {
             "type": "string"
@@ -176,6 +221,28 @@
         },
         "targetBranch": {
           "type": "string"
+        },
+        "transitive": {
+          "enum": [
+            "upgrade",
+            "pin"
+          ],
+          "type": "string"
+        },
+        "unverified": {
+          "additionalProperties": false,
+          "properties": {
+            "labels": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "publish": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
         }
       },
       "type": "object"

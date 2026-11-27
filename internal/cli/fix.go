@@ -148,8 +148,18 @@ func repoFromURL(raw string) string {
 
 func printPlan(env Env, plan *engine.FixPlan, quiet bool) {
 	w := env.Stdout
+	unverified := 0
 	for _, cs := range plan.ChangeSets {
-		fmt.Fprintf(w, "### %s\nbranch: %s\nlabels: %s\n\n%s\n", cs.Title, cs.Branch, strings.Join(cs.Labels, ", "), cs.Diff)
+		fmt.Fprintf(w, "### %s\nbranch: %s\nlabels: %s\n", cs.Title, cs.Branch, strings.Join(cs.Labels, ", "))
+		for _, it := range cs.Items {
+			if it.Unverified {
+				fmt.Fprintf(w, "NOT VERIFIED: %s: %s\n", it.Package, it.VerifyFailure)
+			}
+		}
+		if cs.Unverified {
+			unverified++
+		}
+		fmt.Fprintf(w, "\n%s\n", cs.Diff)
 	}
 	if quiet {
 		return
@@ -163,14 +173,20 @@ func printPlan(env Env, plan *engine.FixPlan, quiet bool) {
 	for _, f := range plan.Failed {
 		fmt.Fprintf(w, "failed: %s %s: %s\n", f.Project, f.Rule, f.Reason)
 	}
-	fmt.Fprintf(w, "Dry run: %d change request(s) prepared, %d manual, %d verification failure(s). Nothing was written; add --publish to open them.\n",
-		len(plan.ChangeSets), len(plan.Manual), len(plan.Failed))
+	fmt.Fprintf(w, "Dry run: %d change request(s) prepared (%d unverified), %d manual, %d verification failure(s). Nothing was written; add --publish to open them.\n",
+		len(plan.ChangeSets), unverified, len(plan.Manual), len(plan.Failed))
+	if len(plan.Failed) > 0 {
+		fmt.Fprintln(w, "Changes that failed verification get no request; set fix.unverified.publish to open them marked as unverified.")
+	}
 }
 
 func printPublish(env Env, plan *engine.FixPlan, res *engine.PublishResult) {
 	w := env.Stdout
 	for _, cr := range res.Created {
 		fmt.Fprintf(w, "created: %s %s\n", cr.URL, cr.Title)
+	}
+	if len(plan.Failed) > 0 {
+		defer fmt.Fprintln(w, "Changes that failed verification got no request; set fix.unverified.publish to open them marked as unverified.")
 	}
 	for _, cr := range res.Updated {
 		fmt.Fprintf(w, "updated: %s %s\n", cr.URL, cr.Title)

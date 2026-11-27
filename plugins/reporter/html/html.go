@@ -6,6 +6,7 @@ package html
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"html/template"
 	"io"
 	"strings"
@@ -33,6 +34,18 @@ var page = template.Must(template.New("report").Funcs(template.FuncMap{
 			return "Other findings"
 		}
 		return strings.ToUpper(k[:1]) + k[1:] + " findings"
+	},
+	"pkgNS":       pkgNS,
+	"pkgName":     pkgName,
+	"sevShort":    sevShort,
+	"shortSHA":    shortSHA,
+	"advisoryURL": advisoryURL,
+	"dict": func(kv ...any) map[string]any {
+		m := map[string]any{}
+		for i := 0; i+1 < len(kv); i += 2 {
+			m[fmt.Sprint(kv[i])] = kv[i+1]
+		}
+		return m
 	},
 	"nonzero": func(cs []count) bool {
 		for _, c := range cs {
@@ -67,4 +80,53 @@ func (Reporter) Render(ctx context.Context, res *sdk.ScanResult, w io.Writer) er
 		return err
 	}
 	return page.Execute(w, buildView(res))
+}
+
+// pkgSplit splits a package name into its namespace (with the separator) and
+// its own name: "org.x:lib" → "org.x:", "lib"; "@scope/pkg" → "@scope/",
+// "pkg"; "github.com/a/b" → "github.com/a/", "b".
+func pkgSplit(name string) (string, string) {
+	i := strings.LastIndexAny(name, ":/")
+	if i <= 0 || i == len(name)-1 {
+		return "", name
+	}
+	return name[:i+1], name[i+1:]
+}
+
+func pkgNS(name string) string   { ns, _ := pkgSplit(name); return ns }
+func pkgName(name string) string { _, n := pkgSplit(name); return n }
+
+// sevShort abbreviates a severity for the fixed-width severity labels.
+func sevShort(s string) string {
+	switch s {
+	case "critical":
+		return "crit"
+	case "medium":
+		return "med"
+	case "unknown":
+		return "unkn"
+	}
+	return s
+}
+
+// shortSHA shortens a commit SHA for display.
+func shortSHA(s string) string {
+	if len(s) > 12 {
+		return s[:12]
+	}
+	return s
+}
+
+// advisoryURL links an advisory ID: its OSV page when one is referenced,
+// else its first reference, else the OSV page by ID.
+func advisoryURL(r vulnRow) string {
+	for _, ref := range r.References {
+		if strings.HasPrefix(ref.URL, "https://osv.dev/vulnerability/") {
+			return ref.URL
+		}
+	}
+	if len(r.References) > 0 {
+		return r.References[0].URL
+	}
+	return "https://osv.dev/vulnerability/" + r.ID
 }

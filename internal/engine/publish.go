@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/deepward-oss/deepward/pkg/sdk"
+	"github.com/deepward-oss/deepward/pkg/sdk/purl"
 )
 
 // DefaultLimit is the default number of concurrently open bot change requests.
@@ -52,7 +53,14 @@ func advisoryLink(f sdk.Finding) string {
 // Body renders the change-request description.
 func Body(cs ChangeSet) string {
 	var b strings.Builder
-	b.WriteString("This change was prepared and verified by **Deepward**: the project was rebuilt with the change and the targeted findings are gone.\n\n")
+	if cs.Unverified {
+		b.WriteString("> [!WARNING]\n> **Not verified.** Deepward prepared this change, but after rebuilding the project with it, " +
+			"some targeted findings are still reported. It is a candidate, not a confirmed fix: review the dependency tree before merging, " +
+			"and do not merge it automatically.\n\n")
+		writeUnverified(&b, cs)
+	} else {
+		b.WriteString("This change was prepared and verified by **Deepward**: the project was rebuilt with the change and the targeted findings are gone.\n\n")
+	}
 	if cs.NotBuilt {
 		b.WriteString("> **Not built:** the affected packages are resolved dependencies of the project but are not compiled into it, " +
 			"so the vulnerable code does not ship. The update keeps the dependency files clean for other scanners and audits; it is not urgent.\n\n")
@@ -98,7 +106,11 @@ func Body(cs ChangeSet) string {
 	}
 	if len(advisories) > 0 {
 		sort.Strings(advisories)
-		b.WriteString("\n### Fixed vulnerabilities\n\n")
+		heading := "Fixed vulnerabilities"
+		if cs.Unverified {
+			heading = "Targeted vulnerabilities"
+		}
+		b.WriteString("\n### " + heading + "\n\n")
 		b.WriteString(strings.Join(advisories, "\n"))
 		b.WriteString("\n")
 	}
@@ -114,6 +126,20 @@ func Body(cs ChangeSet) string {
 	if len(notes) > 0 {
 		b.WriteString("\n### Release notes\n\n" + strings.Join(notes, "\n") + "\n")
 	}
+	var tasks []string
+	for _, it := range cs.Items {
+		for _, t := range it.Tasks {
+			if !contains(tasks, t) {
+				tasks = append(tasks, t)
+			}
+		}
+	}
+	if len(tasks) > 0 {
+		b.WriteString("\n### Post tasks\n\nRun after the change, their output is part of this request:\n\n")
+		for _, t := range tasks {
+			b.WriteString("- `" + t + "`\n")
+		}
+	}
 	b.WriteString("\n<sub>Project `" + cs.Project.ID + "` · group `" + cs.Group + "`. Deepward updates this request on every run; push your own commits to pause it.</sub>\n\n")
 	items := make([]string, 0, len(cs.Items))
 	for _, it := range cs.Items {
@@ -122,6 +148,61 @@ func Body(cs ChangeSet) string {
 	meta, _ := json.Marshal(Marker{Project: cs.Project.ID, Group: cs.Group, Items: items})
 	b.WriteString(markerPrefix + string(meta) + " -->\n")
 	return b.String()
+}
+
+// writeUnverified lists why each unverified item failed verification and
+// how to inspect it.
+func writeUnverified(b *strings.Builder, cs ChangeSet) {
+	b.WriteString("### Why it is not verified\n\n")
+	for _, it := range cs.Items {
+		if !it.Unverified {
+			continue
+		}
+		name := it.Package
+		if !it.Text {
+			name = "`" + packageName(it.Package) + "` " + it.From + " → " + it.To
+		}
+		fmt.Fprintf(b, "- %s: %s.", name, it.VerifyFailure)
+		if h := inspectHint(cs.Project, it); h != "" {
+			fmt.Fprintf(b, " Inspect with %s.", h)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\nCommon causes: a pin or upgrade does not reach every path to the vulnerable package, the advisory is about a " +
+		"different artifact or version range, or another dependency brings the package again.\n\n")
+}
+
+// inspectHint suggests a command that shows where the vulnerable package of
+// an item comes from.
+func inspectHint(p sdk.Project, it FixItem) string {
+	var u purl.PURL
+	for _, f := range it.Findings {
+		if pkg := f.PrimaryPackage(); pkg != nil {
+			if parsed, err := purl.Parse(pkg.PURL); err == nil {
+				u = parsed
+				break
+			}
+		}
+	}
+	if u.Name == "" {
+		return ""
+	}
+	name := u.Coordinates()
+	switch p.Ecosystem {
+	case "maven":
+		return "`mvn dependency:tree -Dverbose -Dincludes=" + name + "`"
+	case "sbt":
+		return "`sbt \"whatDependsOn " + strings.ReplaceAll(name, ":", " ") + "\"`"
+	case "npm":
+		return "`npm ls " + name + "`"
+	case "go":
+		return "`go mod why -m " + name + "`"
+	case "cargo":
+		return "`cargo tree -i " + name + "`"
+	case "nuget":
+		return "`dotnet list package --include-transitive`"
+	}
+	return ""
 }
 
 // PublishResult reports what happened on the platform.

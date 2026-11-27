@@ -8,133 +8,155 @@
 <style>{{css}}</style>
 </head>
 <body>
-<header class="top">
-  <div class="brand">Deepward <span class="muted">report</span></div>
+<header class="bar">
+  <div class="brand">deepward<span class="slash">/</span><span class="page">report</span></div>
   <dl class="meta">
-    {{with .Res.Run.RepoURL}}<div><dt>Repository</dt><dd>{{.}}</dd></div>{{end}}
-    {{with .Res.Run.Branch}}<div><dt>Branch</dt><dd>{{.}}</dd></div>{{end}}
-    {{with .Res.Run.Commit}}<div><dt>Commit</dt><dd><code>{{.}}</code></dd></div>{{end}}
-    {{with .Generated}}<div><dt>Generated</dt><dd>{{.}}</dd></div>{{end}}
-    <div><dt>Tool</dt><dd>Deepward {{.Res.Tool.Version}}</dd></div>
-    {{if .Res.Run.Offline}}<div><dt>Mode</dt><dd>offline</dd></div>{{end}}
+    {{with .Res.Run.RepoURL}}<div><dt>repo</dt><dd title="{{.}}">{{.}}</dd></div>{{end}}
+    {{with .Res.Run.Branch}}<div><dt>branch</dt><dd>{{.}}</dd></div>{{end}}
+    {{with .Res.Run.Commit}}<div><dt>commit</dt><dd title="{{.}}">{{shortSHA .}}</dd></div>{{end}}
+    {{with .Generated}}<div><dt>generated</dt><dd>{{.}}</dd></div>{{end}}
+    <div><dt>tool</dt><dd>{{.Res.Tool.Version}}</dd></div>
+    {{if .Res.Run.Offline}}<div><dt>mode</dt><dd>offline</dd></div>{{end}}
   </dl>
 </header>
 
 <main>
 <section class="summary" aria-label="Summary">
-  <div class="cards">
-    {{range .Severities}}<div class="card sev-{{.Name}}" data-summary="{{.Name}}"><div class="num">{{.Count}}</div><div class="label">{{.Name}}</div></div>{{end}}
-    {{if .NotBuilt}}<div class="card notbuilt" data-summary-notbuilt><div class="num">{{.NotBuilt}}</div><div class="label">not built</div></div>{{end}}
-    <div class="card neutral"><div class="num">{{.Res.Summary.Suppressed}}</div><div class="label">suppressed</div></div>
-  </div>
-  <div class="facts">
-    <p><strong>{{len .Res.Projects}}</strong> project(s):
-      {{range $i, $s := .ProjectStats}}{{if $i}}, {{end}}{{$s.Count}} {{$s.Name}}{{end}}.
-      Dependencies with findings: <strong>{{.Res.Summary.Direct}}</strong> direct, <strong>{{.Res.Summary.Transitive}}</strong> transitive.</p>
-    {{if .Analyzers}}<p>By analyzer: {{range $i, $a := .Analyzers}}{{if $i}}, {{end}}<code>{{$a.Name}}</code> {{$a.Count}}{{end}}.</p>{{end}}
-    {{if .Res.Gate.Threshold}}
-    <p class="gate {{if .Res.Gate.Failed}}failed{{else}}passed{{end}}">Quality gate (<code>{{.Res.Gate.Threshold}}</code>):
-      {{if .Res.Gate.Failed}}<strong>failed</strong>{{else}}<strong>passed</strong>{{end}}, {{.Res.Gate.Count}} active finding(s) at or above the threshold.{{if .NotBuilt}} Findings in packages that are not built do not count.{{end}}</p>
-    {{end}}
-  </div>
+  {{range .Severities}}<div class="stat sev-{{.Name}}{{if not .Count}} zero{{end}}" data-summary="{{.Name}}"><span class="num">{{.Count}}</span><span class="label">{{.Name}}</span></div>{{end}}
+  {{if .NotBuilt}}<div class="stat notbuilt" data-summary-notbuilt><span class="num">{{.NotBuilt}}</span><span class="label">not built</span></div>{{end}}
+  <div class="stat neutral{{if not .Res.Summary.Suppressed}} zero{{end}}"><span class="num">{{.Res.Summary.Suppressed}}</span><span class="label">suppressed</span></div>
+  {{if .Res.Gate.Threshold}}<div class="gate {{if .Res.Gate.Failed}}failed{{else}}passed{{end}}" title="Quality gate: active findings at or above {{.Res.Gate.Threshold}}">gate {{.Res.Gate.Threshold}}: <strong>{{if .Res.Gate.Failed}}failed{{else}}passed{{end}}</strong> ({{.Res.Gate.Count}})</div>{{end}}
 </section>
+<p class="facts">
+  <b>{{len .Res.Projects}}</b> project(s): {{range $i, $s := .ProjectStats}}{{if $i}}, {{end}}{{$s.Count}} {{$s.Name}}{{end}}<span class="sep">·</span>dependencies with findings: <b>{{.Res.Summary.Direct}}</b> direct, <b>{{.Res.Summary.Transitive}}</b> transitive{{if .Analyzers}}<span class="sep">·</span>{{range $i, $a := .Analyzers}}{{if $i}}, {{end}}{{$a.Name}} <b>{{$a.Count}}</b>{{end}}{{end}}{{if and .Res.Gate.Threshold .NotBuilt}}<span class="sep">·</span>findings in packages that are not built do not count toward the gate{{end}}
+</p>
 
-<section class="filters" aria-label="Filters" hidden>
-  <label>Project <select id="f-project"><option value="">all</option>{{range .ProjectIDs}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
-  <label>Ecosystem <select id="f-ecosystem"><option value="">all</option>{{range .Ecosystems}}<option value="{{.}}">{{.}}</option>{{end}}</select></label>
-  <label>Severity <select id="f-severity"><option value="">all</option><option>critical</option><option>high</option><option>medium</option><option>low</option><option>unknown</option></select></label>
-  <label>Dependency <select id="f-direct"><option value="">all</option><option value="direct">direct</option><option value="transitive">transitive</option></select></label>
-  {{if .NotBuilt}}<label>Build <select id="f-built"><option value="">all</option><option value="built">built</option><option value="not-built">not built</option></select></label>{{end}}
-  <label class="grow">Search <input id="f-search" type="search" placeholder="package or advisory ID"></label>
-</section>
+<div class="toolbar">
+  <nav class="toc" aria-label="Sections">
+    <a href="#vulnerabilities">vulnerabilities<span class="n">{{len .Vulns}}</span></a>
+    {{if .NotBuiltVulns}}<a href="#not-built">not built<span class="n">{{len .NotBuiltVulns}}</span></a>{{end}}
+    {{if .Outdated}}<a href="#outdated">outdated<span class="n">{{len .Outdated}}</span></a>{{end}}
+    {{range .Generic}}<a href="#kind-{{.Kind}}-section">{{.Kind}}<span class="n">{{len .Rows}}</span></a>{{end}}
+    <a href="#projects">projects<span class="n">{{len .Res.Projects}}</span></a>
+    <a href="#suppressed">suppressed<span class="n">{{len .Suppressed}}</span></a>
+  </nav>
+  <div class="filters" aria-label="Filters" hidden>
+    <select id="f-project" aria-label="Project"><option value="">project: all</option>{{range .ProjectIDs}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+    <select id="f-ecosystem" aria-label="Ecosystem"><option value="">ecosystem: all</option>{{range .Ecosystems}}<option value="{{.}}">{{.}}</option>{{end}}</select>
+    <select id="f-severity" aria-label="Severity"><option value="">severity: all</option><option>critical</option><option>high</option><option>medium</option><option>low</option><option>unknown</option></select>
+    <select id="f-direct" aria-label="Dependency"><option value="">dependency: all</option><option value="direct">direct</option><option value="transitive">transitive</option></select>
+    {{if .NotBuilt}}<select id="f-built" aria-label="Build"><option value="">build: all</option><option value="built">built</option><option value="not-built">not built</option></select>{{end}}
+    <input id="f-search" type="search" placeholder="search package or advisory  /" aria-label="Search package or advisory ID">
+    <button type="button" class="btn" data-expand="all" title="Expand all rows">expand</button>
+    <button type="button" class="btn" data-expand="none" title="Collapse all rows">collapse</button>
+  </div>
+</div>
 
-<section id="vulnerabilities">
-  <h2>Vulnerabilities <span class="count" data-count-for="vulns">{{len .Vulns}}</span></h2>
-  {{if .Vulns}}
-  <p class="muted">{{.VulnAdvisories}} advisories in {{len .Vulns}} package version(s): {{range $i, $c := .VulnCounts}}{{if $i}} · {{end}}{{$c.Count}} {{$c.Name}}{{end}}</p>
-  <table class="findings" id="vulns">
-    <thead><tr>
-      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Advisories</th><th data-sort="text">Package</th>
-      <th data-sort="text">Project</th><th data-sort="text">Dependency</th><th data-sort="text">Fixed in</th>
-    </tr></thead>
-    {{template "vulnrows" .Vulns}}
-  </table>
+<section class="panel" id="vulnerabilities">
+  <div class="panel-head">
+    <h2>Vulnerabilities</h2><span class="count" data-count-for="vulns">{{len .Vulns}}</span>
+    {{if .Vulns}}<span class="sub">{{.VulnAdvisories}} advisories in {{len .Vulns}} package version(s): {{range $i, $c := .VulnCounts}}{{if $i}} · {{end}}{{$c.Count}} {{$c.Name}}{{end}}</span>{{end}}
+  </div>
+  {{if .Vulns}}{{template "vulntable" dict "ID" "vulns" "Rows" .Vulns}}
   {{else}}<p class="empty">No vulnerabilities found{{if .NotBuiltVulns}} in code that is built{{end}}.</p>{{end}}
 </section>
 
 {{if .NotBuiltVulns}}
-<section id="not-built" class="notbuilt">
-  <h2>Not built <span class="count" data-count-for="vulns-notbuilt">{{len .NotBuiltVulns}}</span></h2>
+<section class="panel notbuilt" id="not-built">
+  <div class="panel-head">
+    <h2>Not built</h2><span class="count" data-count-for="vulns-notbuilt">{{len .NotBuiltVulns}}</span>
+    <span class="sub">{{.NotBuiltAdvisories}} advisories in {{len .NotBuiltVulns}} package version(s): {{range $i, $c := .NotBuiltCounts}}{{if $i}} · {{end}}{{$c.Count}} {{$c.Name}}{{end}}</span>
+  </div>
   <p class="explain">These packages are resolved dependencies of the project (they are in its lockfile or module graph) but are <strong>not compiled into it</strong>, so the vulnerable code does not ship. They do not count toward the quality gate, and their fixes are not urgent. Update them anyway to keep the dependency files clean for other scanners and audits: <code>deepward fix</code> prepares the changes.</p>
-  <p class="muted">{{.NotBuiltAdvisories}} advisories in {{len .NotBuiltVulns}} package version(s): {{range $i, $c := .NotBuiltCounts}}{{if $i}} · {{end}}{{$c.Count}} {{$c.Name}}{{end}}</p>
-  <table class="findings" id="vulns-notbuilt">
-    <thead><tr>
-      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Advisories</th><th data-sort="text">Package</th>
-      <th data-sort="text">Project</th><th data-sort="text">Dependency</th><th data-sort="text">Fixed in</th>
-    </tr></thead>
-    {{template "vulnrows" .NotBuiltVulns}}
-  </table>
+  {{template "vulntable" dict "ID" "vulns-notbuilt" "Rows" .NotBuiltVulns}}
 </section>
 {{end}}
 
 {{if .Outdated}}
-<section id="outdated">
-  <h2>Outdated dependencies <span class="count" data-count-for="outdated-table">{{len .Outdated}}</span></h2>
+<section class="panel" id="outdated">
+  <div class="panel-head"><h2>Outdated dependencies</h2><span class="count" data-count-for="outdated-table">{{len .Outdated}}</span></div>
+  <div class="scroll">
   <table class="findings" id="outdated-table">
-    <thead><tr><th data-sort="text">Package</th><th data-sort="text">Current</th><th data-sort="text">Patch</th><th data-sort="text">Minor</th><th data-sort="text">Major</th><th data-sort="text">Project</th></tr></thead>
+    <colgroup><col><col style="width:120px"><col style="width:120px"><col style="width:120px"><col style="width:120px"><col style="width:100px"><col style="width:140px"></colgroup>
+    <thead><tr><th data-sort="text">Package</th><th data-sort="text">Current</th><th data-sort="text">Patch</th><th data-sort="text">Minor</th><th data-sort="text">Major</th><th data-sort="text">Dependency</th><th data-sort="text">Project</th></tr></thead>
     {{range .Outdated}}
     <tbody class="item" data-project="{{.Project}}" data-ecosystem="{{.Ecosystem}}" data-severity="none" data-direct="{{if .Direct}}direct{{else}}transitive{{end}}" data-search="{{.Search}}">
-      <tr class="main"><td><code>{{.Package}}</code></td><td>{{.Current}}</td><td>{{.Patch}}</td><td>{{.Minor}}</td><td>{{.Major}}</td><td>{{.Project}}</td></tr>
+      <tr class="main">
+        <td class="cut" title="{{.Package}}">{{template "pkg" .Package}}</td>
+        <td class="cut v">{{.Current}}</td>
+        <td class="cut v">{{with .Patch}}<span class="to">{{.}}</span>{{else}}<span class="dash">·</span>{{end}}</td>
+        <td class="cut v">{{with .Minor}}<span class="to">{{.}}</span>{{else}}<span class="dash">·</span>{{end}}</td>
+        <td class="cut v">{{with .Major}}<span class="to">{{.}}</span>{{else}}<span class="dash">·</span>{{end}}</td>
+        <td class="cut mono muted">{{if .Direct}}direct{{else}}transitive{{end}}</td>
+        <td class="cut mono" title="{{.Project}}">{{.Project}}</td>
+      </tr>
     </tbody>
     {{end}}
   </table>
+  </div>
 </section>
 {{end}}
 
 {{range .Generic}}
-<section class="generic">
-  <h2>{{kindTitle .Kind}} <span class="count" data-count-for="kind-{{.Kind}}">{{len .Rows}}</span></h2>
+<section class="panel generic" id="kind-{{.Kind}}-section">
+  <div class="panel-head"><h2>{{kindTitle .Kind}}</h2><span class="count" data-count-for="kind-{{.Kind}}">{{len .Rows}}</span></div>
+  <div class="scroll">
   <table class="findings" id="kind-{{.Kind}}">
+    <colgroup><col style="width:86px"><col style="width:26%"><col><col style="width:22%"><col style="width:130px"></colgroup>
     <thead><tr><th data-sort="rank">Severity</th><th data-sort="text">Rule</th><th data-sort="text">Message</th><th data-sort="text">Location</th><th data-sort="text">Source</th></tr></thead>
     {{range .Rows}}
     <tbody class="item" data-project="{{.Project}}" data-ecosystem="{{.Ecosystem}}" data-severity="{{.Severity}}" data-direct="" data-search="{{.Search}}" data-rank="{{.Rank}}">
-      <tr class="main"><td><span class="badge sev-{{.Severity}}">{{.Severity}}</span></td><td><code>{{.Rule}}</code></td><td>{{.Message}}</td>
-        <td><code>{{.Location}}</code></td><td>{{.Analyzer}}{{with .Tool}} <span class="muted">({{.}})</span>{{end}}</td></tr>
+      <tr class="main">
+        <td><span class="sev sev-{{.Severity}}">{{sevShort .Severity}}</span></td>
+        <td class="cut mono" title="{{.Rule}}">{{.Rule}}</td>
+        <td class="cut" title="{{.Message}}">{{.Message}}</td>
+        <td class="cut mono" title="{{.Location}}">{{.Location}}</td>
+        <td class="cut mono muted">{{.Analyzer}}{{with .Tool}} ({{.}}){{end}}</td>
+      </tr>
     </tbody>
     {{end}}
   </table>
+  </div>
 </section>
 {{end}}
 
-<section id="projects">
-  <h2>Projects</h2>
-  <table class="plain">
-    <thead><tr><th>Project</th><th>Status</th><th>Findings</th><th>Details</th></tr></thead>
+<section class="panel" id="projects">
+  <div class="panel-head"><h2>Projects</h2><span class="count">{{len .Projects}}</span></div>
+  {{if .Projects}}
+  <div class="scroll">
+  <table>
+    <colgroup><col style="width:30%"><col style="width:90px"><col style="width:90px"><col></colgroup>
+    <thead><tr><th>Project</th><th>Status</th><th class="num">Findings</th><th>Details</th></tr></thead>
     <tbody>
     {{range .Projects}}
-      <tr class="status-{{.Status}}"><td><code>{{.ID}}</code></td><td>{{.Status}}</td><td>{{.Findings}}</td>
-        <td>{{.Reason}}{{with .Output}}<details><summary>Tool output (last {{len .}} lines)</summary><pre>{{range .}}{{.}}
+      <tr class="status-{{.Status}}"><td class="cut mono" title="{{.ID}}">{{.ID}}</td><td><span class="status">{{.Status}}</span></td><td class="num v">{{.Findings}}</td>
+        <td>{{with .Reason}}<span class="mono small">{{.}}</span>{{else}}<span class="dash">·</span>{{end}}{{with .Output}}<details class="more"><summary>tool output, last {{len .}} lines</summary><pre class="tail">{{range .}}{{.}}
 {{end}}</pre></details>{{end}}</td></tr>
-    {{else}}<tr><td colspan="4" class="empty">No projects detected.</td></tr>{{end}}
+    {{end}}
     </tbody>
   </table>
+  </div>
+  {{else}}<p class="empty">No projects detected.</p>{{end}}
   {{with .FailedRuns}}
-  <h3>Failed plugin runs</h3>
+  <h3 class="sub-head">Failed plugin runs</h3>
   <ul class="problems">{{range .}}<li><code>{{.Plugin}}</code>{{with .Project}} on <code>{{.}}</code>{{end}}: {{.Reason}}</li>{{end}}</ul>
   {{end}}
   {{with .Res.Warnings}}
-  <h3>Warnings</h3>
-  <ul class="problems">{{range .}}<li><span class="muted">{{.Code}}</span> {{.Message}}</li>{{end}}</ul>
+  <h3 class="sub-head">Warnings</h3>
+  <ul class="problems">{{range .}}<li><code>{{.Code}}</code> {{.Message}}</li>{{end}}</ul>
   {{end}}
 </section>
 
-<section id="suppressed">
-  <h2>Suppressed <span class="count">{{len .Suppressed}}</span></h2>
+<section class="panel" id="suppressed">
+  <div class="panel-head"><h2>Suppressed</h2><span class="count">{{len .Suppressed}}</span></div>
   {{if .Suppressed}}
-  <table class="plain">
+  <div class="scroll">
+  <table>
+    <colgroup><col style="width:180px"><col style="width:26%"><col style="width:120px"><col><col style="width:110px"></colgroup>
     <thead><tr><th>Rule</th><th>Package</th><th>Project</th><th>Reason</th><th>Expires</th></tr></thead>
-    <tbody>{{range .Suppressed}}<tr><td><code>{{.Rule}}</code></td><td>{{.Package}}</td><td>{{.Project}}</td><td>{{.Reason}}</td><td>{{.Expires}}</td></tr>{{end}}</tbody>
+    <tbody>{{range .Suppressed}}<tr><td class="cut mono" title="{{.Rule}}">{{.Rule}}</td><td class="cut" title="{{.Package}}">{{if .Package}}{{template "pkg" .Package}}{{else}}<span class="dash">·</span>{{end}}</td><td class="cut mono">{{.Project}}</td><td>{{.Reason}}</td><td class="v">{{with .Expires}}{{.}}{{else}}<span class="dash">·</span>{{end}}</td></tr>{{end}}</tbody>
   </table>
+  </div>
   {{else}}<p class="empty">No suppressed findings.</p>{{end}}
 </section>
 </main>
@@ -143,42 +165,61 @@
   {{with .Res.DataSources}}
   <p>Vulnerability data: {{range $i, $d := .}}{{if $i}}; {{end}}<strong>{{$d.Name}}</strong> ({{$d.License}}{{with $d.Attribution}}, {{.}}{{end}}){{end}}.</p>
   {{end}}
-  <p class="muted">Generated by Deepward {{.Res.Tool.Version}} · schema v{{.Res.SchemaVersion}}</p>
+  <p class="faint mono small">Generated by Deepward {{.Res.Tool.Version}} · schema v{{.Res.SchemaVersion}}</p>
 </footer>
 <script>{{js}}</script>
 </body>
 </html>
-{{define "vulnrows"}}{{range .}}
+{{define "pkg"}}<span class="pkg">{{with pkgNS .}}<span class="ns">{{.}}</span>{{end}}<span class="name">{{pkgName .}}</span></span>{{end}}
+{{define "vulntable"}}
+  <div class="scroll">
+  <table class="findings" id="{{.ID}}">
+    <colgroup><col style="width:124px"><col><col style="width:120px"><col style="width:120px"><col style="width:170px"><col style="width:170px"><col style="width:120px"></colgroup>
+    <thead><tr>
+      <th data-sort="rank" aria-sort="descending">Severity</th><th data-sort="text">Package</th><th data-sort="text">Version</th><th data-sort="text">Fixed in</th>
+      <th data-sort="text">Dependency</th><th data-sort="text">Advisories</th><th data-sort="text">Project</th>
+    </tr></thead>
+    {{range .Rows}}
     <tbody class="item" data-project="{{.Project}}" data-ecosystem="{{.Ecosystem}}" data-severity="{{.Severity}}" data-findings="{{.Findings}}" data-direct="{{if .Direct}}direct{{else}}transitive{{end}}" data-built="{{if .NotBuilt}}not-built{{else}}built{{end}}" data-search="{{.Search}}" data-rank="{{.Rank}}">
       <tr class="main">
-        <td><span class="badge sev-{{.Severity}}">{{.Severity}}</span></td>
-        <td><button type="button" class="toggle" aria-expanded="true">{{len .Advisories}} {{if eq (len .Advisories) 1}}advisory{{else}}advisories{{end}}</button><div class="muted small">{{join .IDs ", "}}</div></td>
-        <td><code>{{.Package}}</code> <span class="ver">{{.Version}}</span>{{if .NotBuilt}} <span class="badge notbuilt" title="Resolved but not compiled into the project">not built</span>{{end}}</td>
-        <td>{{.Project}}</td>
-        <td>{{if .Direct}}direct{{else}}transitive{{end}}{{with .Scope}} <span class="muted">({{.}})</span>{{end}}</td>
-        <td>{{if .FixedIn}}<code>{{.FixedIn}}</code>{{else if .NoFix}}<span class="muted">no fix</span>{{end}}</td>
+        <td><button type="button" class="toggle" aria-expanded="true" title="Show details"><span class="sev sev-{{.Severity}}">{{sevShort .Severity}}</span>{{with .Score}}<span class="score">{{.}}</span>{{end}}</button></td>
+        <td class="cut" title="{{.Package}}">{{template "pkg" .Package}}{{if .NotBuilt}} <span class="tag notbuilt" title="Resolved but not compiled into the project">not built</span>{{end}}</td>
+        <td class="cut v" title="{{.Version}}">{{.Version}}</td>
+        <td class="cut v" title="{{.FixedIn}}">{{if .FixedIn}}<span class="to">{{.FixedIn}}</span>{{else if .NoFix}}<span class="muted">no fix</span>{{else}}<span class="dash">·</span>{{end}}</td>
+        <td class="cut mono muted">{{if .Direct}}direct{{else}}transitive{{end}}{{with .Scope}} · {{.}}{{end}}</td>
+        <td class="cut mono" title="{{join .IDs ", "}}"><span class="dots">{{range .Advisories}}<span class="dot sev-{{.Severity}}" title="{{.ID}}: {{.Severity}}"></span>{{end}}</span>{{len .Advisories}} <span class="muted">{{if eq (len .Advisories) 1}}advisory{{else}}advisories{{end}}</span></td>
+        <td class="cut mono" title="{{.Project}}">{{.Project}}</td>
       </tr>
-      <tr class="detail"><td colspan="6">
+      <tr class="detail"><td colspan="7"><div class="detail-body">
         <dl class="kv">
-          {{with .FixedIn}}<dt>Fixed in</dt><dd><code>{{.}}</code> <span class="muted">(fixes all advisories below)</span></dd>{{end}}
-          {{with .Recommendation}}<dt>Recommended action</dt><dd>{{.}}</dd>{{end}}
-          {{with .Paths}}<dt>Dependency path</dt><dd><ul class="paths">{{range .}}<li>{{.}}</li>{{end}}</ul></dd>{{end}}
-          <dt>Declared in</dt><dd><code>{{.Location}}</code></dd>
+          {{with .Recommendation}}<dt>action</dt><dd><div class="action">{{.}}</div></dd>{{end}}
+          {{with .FixedIn}}<dt>fixed in</dt><dd class="v"><span class="to">{{.}}</span> <span class="faint">fixes every advisory below</span></dd>{{end}}
+          {{with .Chains}}<dt>path</dt><dd><ul class="chains">{{range .}}<li>{{range $i, $h := .}}{{if $i}}<span class="sep">→</span>{{end}}<span class="{{if $h.Target}}target{{else}}hop{{end}}">{{$h.Name}}<span class="faint">@{{$h.Version}}</span></span>{{end}}</li>{{end}}</ul></dd>{{end}}
+          <dt>declared</dt><dd><code>{{.Location}}</code></dd>
         </dl>
-        {{range .Advisories}}
-        <section class="advisory">
-          <h4><span class="badge sev-{{.Severity}}">{{.Severity}}</span>{{with .Score}} <span class="muted">{{.}}</span>{{end}} <code>{{.ID}}</code>{{with .Aliases}} <span class="muted small">{{join . ", "}}</span>{{end}}</h4>
-          {{with .Title}}<p class="title">{{.}}</p>{{end}}
-          <dl class="kv">
-            {{with .Vector}}<dt>CVSS</dt><dd><code>{{.}}</code></dd>{{end}}
-            {{with .Affected}}<dt>Affected</dt><dd>{{range .}}<code>{{.}}</code> {{end}}</dd>{{end}}
-            {{with .Sources}}<dt>Sources</dt><dd>{{.}}</dd>{{end}}
-            {{with .Published}}<dt>Published</dt><dd>{{.}}</dd>{{end}}
-            {{with .References}}<dt>References</dt><dd><ul class="refs">{{range .}}<li><a href="{{.URL}}" rel="noopener noreferrer">{{.URL}}</a></li>{{end}}</ul></dd>{{end}}
-          </dl>
-          {{with .Details}}<details class="desc"><summary>Description</summary><pre>{{.}}</pre></details>{{end}}
-        </section>
-        {{end}}
-      </td></tr>
+        <table class="advisories">
+          <colgroup><col style="width:72px"><col style="width:220px"><col><col style="width:150px"><col style="width:96px"></colgroup>
+          <thead><tr><th>Severity</th><th>Advisory</th><th>Summary</th><th>Affected</th><th>Published</th></tr></thead>
+          <tbody>
+          {{range .Advisories}}
+            <tr class="adv">
+              <td><span class="sev sev-{{.Severity}}">{{sevShort .Severity}}</span>{{with .Score}}<div class="score">{{.}}</div>{{end}}</td>
+              <td class="adv-id"><a href="{{advisoryURL .}}" rel="noopener noreferrer">{{.ID}}</a>{{with .Aliases}}<div class="aliases">{{join . ", "}}</div>{{end}}</td>
+              <td>{{with .Title}}{{.}}{{else}}<span class="dash">·</span>{{end}}
+                {{if or .Details .References .Vector}}<details class="more"><summary>details{{with .Sources}} · {{.}}{{end}}</summary>
+                  {{with .Vector}}<div class="mono small muted">{{.}}</div>{{end}}
+                  {{with .Details}}<pre>{{.}}</pre>{{end}}
+                  {{with .References}}<ul class="refs">{{range .}}<li><a href="{{.URL}}" rel="noopener noreferrer">{{.URL}}</a></li>{{end}}</ul>{{end}}
+                </details>{{end}}</td>
+              <td class="affected">{{range .Affected}}<code>{{.}}</code>{{else}}<span class="dash">·</span>{{end}}</td>
+              <td class="v muted">{{with .Published}}{{.}}{{else}}<span class="dash">·</span>{{end}}</td>
+            </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div></td></tr>
     </tbody>
-{{end}}{{end}}
+    {{end}}
+  </table>
+  </div>
+{{end}}

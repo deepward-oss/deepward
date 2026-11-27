@@ -7,6 +7,35 @@ All notable changes to Deepward are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-27
+
+### Added
+
+- `fix.transitive`: `upgrade` (default) or `pin`, which change is tried
+  first for a vulnerable transitive dependency; the other is tried when the
+  first does not pass verification.
+- `fix.postTasks`: commands run in the copy of the project after each change
+  and before verification, like Renovate's `postUpgradeTasks`; their changes
+  to the files matching `files` (globs with `**`) go into the change
+  request, other changes are undone, and a failing task rejects the change.
+- `fix.unverified.publish`: changes after which the targeted findings are
+  still reported, but the project builds, get a merge/pull request titled
+  `[unverified]`, labeled `deepward-unverified`, with a warning, the reason
+  and a command to inspect the dependency tree.
+
+### Changed
+
+- The HTML report has a new, compact layout: fixed-width tables with
+  identifiers in a monospace font that never wrap, the package namespace
+  muted, short severity labels with one colored dot per advisory, dependency
+  paths as chains that end in the highlighted vulnerable package, advisories
+  as a small table inside each row with descriptions and references folded,
+  a one-line summary, a sticky toolbar with section links, filters,
+  expand/collapse all, and `/` to search.
+- Rejected changes are logged as warnings (`change rejected`) with the
+  reason, and the summary says how to publish them as unverified, so failed
+  verifications no longer pass silently.
+
 ## [0.2.1] - 2026-11-26
 
 ### Added
@@ -92,7 +121,8 @@ First public release.
   container image at `ghcr.io/deepward-oss/deepward`, SBOMs and build
   provenance attestations.
 
-[Unreleased]: https://github.com/deepward-oss/deepward/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/deepward-oss/deepward/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/deepward-oss/deepward/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/deepward-oss/deepward/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/deepward-oss/deepward/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/deepward-oss/deepward/releases/tag/v0.1.0

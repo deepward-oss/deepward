@@ -100,7 +100,36 @@ type FixConfig struct {
 	// Concurrency is the number of change groups verified in parallel, each
 	// in its own copy of the project (default 2).
 	Concurrency int `yaml:"concurrency"`
+	// Transitive decides what is tried first for a vulnerable transitive
+	// dependency: "upgrade" (default) upgrades the direct dependency that
+	// brings it, "pin" pins its version. The other is tried when the first
+	// does not pass verification.
+	Transitive string `yaml:"transitive" enum:"upgrade,pin"`
+	// PostTasks run after each change is applied and before it is verified.
+	PostTasks []PostTask `yaml:"postTasks"`
+	// Unverified decides what happens to changes whose verification found
+	// the targeted findings still reported.
+	Unverified UnverifiedConfig `yaml:"unverified"`
 }
+
+// UnverifiedConfig is fix.unverified.
+type UnverifiedConfig struct {
+	// Publish opens change requests, marked as unverified, for changes that
+	// keep the project building but after which the targeted findings are
+	// still reported (default false: they are only listed as failures).
+	Publish bool `yaml:"publish"`
+	// Labels are added to such requests (default: [deepward-unverified]).
+	Labels []string `yaml:"labels"`
+}
+
+// DefaultUnverifiedLabels are the labels of unverified change requests.
+var DefaultUnverifiedLabels = []string{"deepward-unverified"}
+
+// Values of fix.transitive.
+const (
+	TransitivePin     = "pin"
+	TransitiveUpgrade = "upgrade"
+)
 
 // DefaultFixConcurrency is the default of fix.concurrency.
 const DefaultFixConcurrency = 2
@@ -205,6 +234,19 @@ func (c *Config) Validate() error {
 	}
 	if c.Fix.Concurrency < 0 {
 		errs = append(errs, errors.New("fix.concurrency must be >= 0"))
+	}
+	switch c.Fix.Transitive {
+	case "", TransitivePin, TransitiveUpgrade:
+	default:
+		errs = append(errs, fmt.Errorf("fix.transitive: %q is not one of %s, %s", c.Fix.Transitive, TransitivePin, TransitiveUpgrade))
+	}
+	for i, t := range c.Fix.PostTasks {
+		if t.Tool == "" {
+			errs = append(errs, fmt.Errorf("fix.postTasks[%d].tool is required", i))
+		}
+		if _, err := compileGlobs(t.Files); err != nil {
+			errs = append(errs, fmt.Errorf("fix.postTasks[%d].files: %w", i, err))
+		}
 	}
 	switch c.Log.Level {
 	case "", "debug", "info", "warn", "error":

@@ -181,3 +181,33 @@ func decodeConfigForTest(src string, c *Config) error {
 	}
 	return strictyaml.Decode(doc, c, "", "deepward.yaml")
 }
+
+func TestTransitiveOrder(t *testing.T) {
+	alts := []sdk.Remediation{pkgChange("parent", "1.0", "1.1", false), pkgChange("parent", "1.0", "1.2", false),
+		pkgChange("child", "2.0", "2.1", true), {Description: "text edit"}}
+	order := func(cfg string) string {
+		e := fixEngine(t, fixWorkspace(t, ""), cfg, true)
+		var out []string
+		for _, r := range e.ordered(alts) {
+			if r.Package == nil {
+				out = append(out, "text")
+				continue
+			}
+			out = append(out, r.Package.To)
+		}
+		return strings.Join(out, ",")
+	}
+	if got := order(""); got != "1.1,1.2,text,2.1" {
+		t.Errorf("default upgrades first: %s", got)
+	}
+	if got := order("fix:\n  transitive: pin\n"); got != "2.1,1.1,1.2,text" {
+		t.Errorf("pin: %s", got)
+	}
+	if got := order("fix:\n  transitive: upgrade\n"); got != "1.1,1.2,text,2.1" {
+		t.Errorf("upgrade keeps upgrades first: %s", got)
+	}
+	var c Config
+	if err := decodeConfigForTest("fix:\n  transitive: bump\n", &c); err == nil && c.Validate() == nil {
+		t.Error("unknown fix.transitive must be rejected")
+	}
+}

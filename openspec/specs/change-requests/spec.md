@@ -39,7 +39,15 @@ The system SHALL change only the version token, preserving the file's formatting
 - **THEN** no edit is produced and the update is marked `manual` with a reason in the report
 
 ### Requirement: Fixing transitive vulnerabilities
-For a transitive finding the system SHALL first propose upgrading the direct ancestor to a version that brings the fix. If none exists, it SHALL pin the transitive version: Maven via `dependencyManagement`, NuGet via `PackageVersion` with `CentralPackageTransitivePinningEnabled` or an explicit `PackageReference`. sbt pinning is not performed in the MVP and the finding is marked `manual`.
+For a transitive finding the system SHALL try two kinds of change: a pin of the transitive version (Maven via `dependencyManagement`, NuGet via `PackageVersion` with `CentralPackageTransitivePinningEnabled` or an explicit `PackageReference`) and an upgrade of the direct ancestor to a version that brings the fix. `fix.transitive` SHALL decide which kind is tried first: `upgrade` (default) or `pin`; the other kind is tried when the first does not pass verification, keeping the analyzer's order within each kind. sbt pinning is not performed in the MVP and the finding is marked `manual`.
+
+#### Scenario: Upgrade first by default
+- **WHEN** a transitive finding has the remediations "upgrade the ancestor to 1.1", "upgrade it to 1.2" and "pin the package to 2.1", and `fix.transitive` is not set
+- **THEN** the upgrades are tried first in their order, and the pin last
+
+#### Scenario: Pin first
+- **WHEN** `fix.transitive` is `pin`
+- **THEN** the pin is tried first, then the ancestor upgrades
 
 #### Scenario: Pinning in Maven
 - **WHEN** the ancestor has no fixing version and `snakeyaml` is fixed in 2.0
@@ -55,6 +63,28 @@ Before publishing, the system SHALL rebuild the project's graph on the edited fi
 #### Scenario: Vulnerability persists after the edit
 - **WHEN** the rebuilt graph still contains the vulnerable version after upgrading the direct dependency
 - **THEN** the change is not published and is marked `verification-failed`
+
+### Requirement: Post tasks
+The system SHALL run the `fix.postTasks` that apply to a project (`ecosystems` and `projects` filters) in its copy after each change is applied and before it is verified, resolving each `tool` through the toolchain and running it in `dir` relative to the project directory with `args` and `env`. Changes the task makes to files matching `files` (globs relative to the repository root, `**` for any number of directories; every file outside excluded directories when empty), including new and deleted files, SHALL become part of the change; other changes SHALL be undone. A task that fails SHALL reject the change with the command and the last line of its output as the reason, and its changes SHALL be undone. The change request SHALL list the tasks that ran.
+
+#### Scenario: Regenerated file joins the change
+- **WHEN** a post task regenerates `app/generated.txt` from the edited versions, writes a log file and `files` is `["app/*.txt"]`
+- **THEN** the change request contains the edited manifest and `app/generated.txt` as generated for the verified version, not the log file
+
+#### Scenario: Failing post task
+- **WHEN** a post task exits with an error
+- **THEN** the change is rejected with `post task <command> failed` and the last output line, and no file it wrote remains in the copy
+
+### Requirement: Unverified changes
+When verification finds the targeted findings still reported but the project still builds, the system SHALL log a warning with the reason and list the change as `verification-failed`, unless `fix.unverified.publish` is true. Then it SHALL publish the first such alternative in the order of preference (`fix.transitive`) in a change request titled `Deepward: [unverified] …`, labeled with `fix.unverified.labels` (default `deepward-unverified`), whose description starts with a warning that the fix is not confirmed, gives the reason for each unverified change and a command to inspect where the package comes from, and lists the advisories as targeted rather than fixed. Changes that break the build or whose post tasks fail SHALL never be published.
+
+#### Scenario: Pin that does not clear the advisory
+- **WHEN** `fix.unverified.publish` is true and after pinning `broken` to 2.0 the advisory is still reported while the project builds
+- **THEN** a change request `Deepward: [unverified] …` with the label `deepward-unverified` pins `broken`, says the advisory is still reported after the change and suggests `mvn dependency:tree -Dverbose -Dincludes=g:broken`
+
+#### Scenario: Default
+- **WHEN** `fix.unverified.publish` is not set
+- **THEN** no change request is created for the change, the summary lists it as a verification failure and says how to publish it as unverified
 
 ### Requirement: Parallel verification
 The system SHALL verify change groups with `fix.concurrency` workers (default 2). Each worker SHALL copy a project once, reuse the copy for every group of that project it verifies and restore the edited files between groups. The resulting plan SHALL not depend on the number of workers.
