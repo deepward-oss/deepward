@@ -16,7 +16,7 @@
 ## 3. Visual assets
 
 - [ ] 3.1 Write `docs/assets/demo.tape` (vhs) that copies `testdata/projects/npm-app` to a temporary directory and runs `deepward scan --fail-on high` and `deepward fix` without `--publish`, and add a `make demo-gif` target that renders it; verify `make demo-gif` produces `docs/assets/demo.gif` of about 15 to 25 seconds and under about 2 MB, readable at 800 px width
-- [ ] 3.2 Capture `docs/assets/report.png` from the demo repository's HTML report artifact at a fixed viewport, cropped to the summary and first findings, and optimize it; verify the image is legible at README width and matches the current report layout
+- [x] 3.2 Capture `docs/assets/report.png` from the demo repository's HTML report artifact at a fixed viewport, cropped to the summary and first findings, and optimize it; verify the image is legible at README width and matches the current report layout
 - [ ] 3.3 Capture `docs/assets/pull-request.png` from one demo security pull request (title, description with verification details, diff summary) in the light theme and optimize it; verify it shows the same pull request recorded in 1.3
 - [x] 3.4 Mention `make demo-gif` and the vhs prerequisite in the Development section of the README draft, and verify the command listed there matches the Makefile target
 
