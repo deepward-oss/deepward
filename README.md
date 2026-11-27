@@ -131,9 +131,13 @@ Scheduled fixes, SARIF upload, GitLab CI and token setup are in
 **One report for every project in the repository**, with filters by project,
 ecosystem, severity and dependency type, plus the same data as JSON and SARIF:
 
-<p align="center"><img src="docs/assets/report.png" alt="Deepward HTML report: findings by severity for npm, Go and Cargo projects" width="800"></p>
+<p align="center"><a href="https://github.com/deepward-oss/deepward-demo/actions/workflows/deepward.yml"><img src="docs/assets/report.png" alt="Deepward HTML report: findings by severity for npm, Go and Cargo projects" width="800"></a></p>
 
-<!-- docs/assets/pull-request.png goes here, linked to the demo pull request. -->
+**A request per fix, with the evidence in it**: the version change, every
+vulnerability it removes, and a note that it was verified. Only the version
+token and the lockfile change:
+
+<p align="center"><a href="https://github.com/deepward-oss/deepward-demo/pull/6"><img src="docs/assets/pull-request.png" alt="A Deepward pull request: lodash 4.17.20 to 4.18.1, four fixed vulnerabilities, verified by Deepward" width="800"></a></p>
 
 ## Installation
 

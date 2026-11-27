@@ -4,7 +4,7 @@
 
 - [x] 1.1 Prepare the demo repository contents locally (copies of `testdata/projects/npm-app`, `go-app` and `cargo-app` in `npm/`, `go/` and `cargo/`, a short README that links back to Deepward, and `.github/workflows/deepward.yml` with a `scan` job on push and pull request and a `fix` job on `workflow_dispatch` only, using `actions/setup-go` and a pinned release archive with checksum verification) and verify `deepward scan` and `deepward fix` run on the copy and report findings in all three projects
 - [ ] 1.2 With the maintainer's explicit go-ahead, create the public `deepward-oss/deepward-demo` repository on GitHub, turn off Dependabot security and version updates, push the contents and protect `main`; verify the settings show Dependabot updates off, no `dependabot.yml` exists, and the `scan` run succeeds and uploads the HTML report artifact and SARIF
-- [ ] 1.3 Dispatch the `fix` job once and verify it opens Deepward pull requests (at least one security fix) whose descriptions show the verified changes, and that no Dependabot pull requests exist; record the pull request and workflow run URLs for the README
+- [x] 1.3 Dispatch the `fix` job once and verify it opens Deepward pull requests (at least one security fix) whose descriptions show the verified changes, and that no Dependabot pull requests exist; record the pull request and workflow run URLs for the README
 
 ## 2. Self-check in this repository
 
@@ -17,7 +17,7 @@
 
 - [ ] 3.1 Write `docs/assets/demo.tape` (vhs) that copies `testdata/projects/npm-app` to a temporary directory and runs `deepward scan --fail-on high` and `deepward fix` without `--publish`, and add a `make demo-gif` target that renders it; verify `make demo-gif` produces `docs/assets/demo.gif` of about 15 to 25 seconds and under about 2 MB, readable at 800 px width
 - [x] 3.2 Capture `docs/assets/report.png` from the demo repository's HTML report artifact at a fixed viewport, cropped to the summary and first findings, and optimize it; verify the image is legible at README width and matches the current report layout
-- [ ] 3.3 Capture `docs/assets/pull-request.png` from one demo security pull request (title, description with verification details, diff summary) in the light theme and optimize it; verify it shows the same pull request recorded in 1.3
+- [x] 3.3 Capture `docs/assets/pull-request.png` from one demo security pull request (title, description with verification details, diff summary) in the light theme and optimize it; verify it shows the same pull request recorded in 1.3
 - [x] 3.4 Mention `make demo-gif` and the vhs prerequisite in the Development section of the README draft, and verify the command listed there matches the Makefile target
 
 ## 4. Comparison research
