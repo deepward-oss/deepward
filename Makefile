@@ -9,7 +9,7 @@ LDFLAGS   := -s -w \
 	-X $(PKG)/internal/buildinfo.Commit=$(COMMIT) \
 	-X $(PKG)/internal/buildinfo.Date=$(DATE)
 
-.PHONY: build dist snapshot image test lint cover cover-check integration licenses tidy clean
+.PHONY: build dist snapshot image test lint cover cover-check integration licenses tidy clean demo-gif
 
 PLATFORMS ?= linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 IMAGE     ?= deepward:$(VERSION)
@@ -52,6 +52,12 @@ integration:
 licenses:
 	$(GO) run github.com/google/go-licenses/v2@v2.0.1 check ./... \
 		--allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,MPL-2.0
+
+# README recording: docs/assets/demo.tape -> docs/assets/demo.gif.
+# Needs vhs (https://github.com/charmbracelet/vhs), Node.js and npm, and
+# network access for vulnerability data. Not part of build, test or CI.
+demo-gif: build
+	vhs docs/assets/demo.tape
 
 tidy:
 	$(GO) mod tidy

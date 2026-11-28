@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="title">
+  <title id="title">Deepward</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0A1A2F"/>
+      <stop offset="1" stop-color="#14395F"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5EEAD4" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#5EEAD4" stop-opacity="0.04"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <!-- The ward: a shield over the dependency tree. -->
+  <path d="M256 78 L398 130 V258 C398 352 338 414 256 446 C174 414 114 352 114 258 V130 Z"
+        fill="url(#shield)" stroke="#5EEAD4" stroke-width="18" stroke-linejoin="round"/>
+  <!-- The tree: root, direct dependencies, a deep transitive one that is fixed. -->
+  <g stroke="#9FB3C8" stroke-width="10" stroke-linecap="round" fill="none">
+    <path d="M256 168 L194 240"/>
+    <path d="M256 168 L318 240"/>
+    <path d="M194 240 L194 318"/>
+    <path d="M318 240 L286 330"/>
+  </g>
+  <g fill="#E2E8F0">
+    <circle cx="256" cy="168" r="20"/>
+    <circle cx="194" cy="240" r="16"/>
+    <circle cx="318" cy="240" r="16"/>
+    <circle cx="194" cy="318" r="13"/>
+  </g>
+  <circle cx="286" cy="334" r="30" fill="#2DD4BF"/>
+  <path d="M272 334 L282 345 L302 323" fill="none" stroke="#0A1A2F" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
