@@ -152,6 +152,10 @@ project, while the demo repository carries the showy findings.
   module is scanned and no request ever touches the intentionally vulnerable
   fixtures. The plugin fixtures need their own pattern: `exclude` matches a
   directory prefix or a single-level glob, and has no `**`.
+- The same file sets `fix.transitive: pin`. The first self-check run fixed
+  a vulnerable `golang.org/x/text` by upgrading `osv-scalibr`, which added
+  more than 130 indirect modules and raised the `go` directive; pinning the
+  transitive module keeps the change to one line.
 - A new workflow `.github/workflows/deepward.yml`, separate from `ci`:
   `scan` on push to `main` and `develop` and on pull requests, with
   `--fail-on high`, the HTML report as an artifact and SARIF uploaded to

@@ -7,3 +7,10 @@ exclude:
   - plugins/*/*/testdata
   - test/
   - examples/
+
+fix:
+  # Pin a vulnerable transitive module instead of upgrading the direct
+  # dependency that brings it in: an upgrade of a large dependency (such as
+  # osv-scalibr) can pull many new modules and a newer go directive into the
+  # binary, which must stay small and MIT-compatible.
+  transitive: pin
