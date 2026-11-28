@@ -27,7 +27,7 @@
 
 ## 5. README rewrite
 
-- [ ] 5.1 Rewrite the hero: banner with alt text set to the tagline, tagline "Dependency fixes, verified before they reach your review.", two-sentence subtitle that defines "verified" as the targeted findings gone and the graph still resolving, and badges (release, `ci` workflow, self-check workflow, MIT, OSV.dev); verify the badges render on GitHub, the self-check badge links to the workflow from 2.2, and the hero, GIF and quickstart fit the first screen at a common laptop size
+- [x] 5.1 Rewrite the hero: banner with alt text set to the tagline, tagline "Dependency fixes, verified before they reach your review.", two-sentence subtitle that defines "verified" as the targeted findings gone and the graph still resolving, and badges (release, `ci` workflow, self-check workflow, MIT, OSV.dev); verify the badges render on GitHub, the self-check badge links to the workflow from 2.2, and the hero, GIF and quickstart fit the first screen at a common laptop size
 - [x] 5.2 Add the demo GIF and the three-line quickstart (`docker run` scan for a lockfile project, `deepward fix`, `deepward fix --publish`) with a "see it live" link to the demo repository; verify each command runs as written against `testdata/projects/npm-app`
 - [x] 5.3 Add the "Why Deepward" section with four pain-to-answer items about fixes and the short orchestrator paragraph after it; verify every statement maps to behavior described in `docs/publishing.md` or `docs/configuration.md` and links there
 - [x] 5.4 Add the comparison table from 4.2; verify it renders correctly on GitHub and its links resolve
