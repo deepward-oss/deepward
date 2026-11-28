@@ -8,9 +8,9 @@
 
 ## 2. Self-check in this repository
 
-- [ ] 2.1 Add `deepward.yaml` at the repository root that excludes `testdata/`, `plugins/*/*/testdata`, `test/` and `examples/`; verify `deepward scan` lists only the root Go module as a project and `deepward fix` (dry run) proposes no change outside `go.mod` and `go.sum`
+- [x] 2.1 Add `deepward.yaml` at the repository root that excludes `testdata/`, `plugins/*/*/testdata`, `test/` and `examples/`; verify `deepward scan` lists only the root Go module as a project and `deepward fix` (dry run) proposes no change outside `go.mod` and `go.sum`
 - [x] 2.2 Add `.github/workflows/deepward.yml`: `scan` on push to `main` and `develop` and on pull requests (`--fail-on high`, HTML report artifact, SARIF upload) and `fix --publish --target-branch develop` on a weekly schedule and `workflow_dispatch`, installing a pinned release archive with checksum verification and using `secrets.GITHUB_TOKEN` with only the documented permissions; verify the YAML is valid and permissions follow the recommended setup in `docs/publishing.md`
-- [ ] 2.3 With the maintainer's explicit go-ahead, push `develop` to `origin` and run the workflow; verify `scan` succeeds, SARIF appears in code scanning, and a dispatched `fix` targets `develop` (or reports nothing to do)
+- [x] 2.3 With the maintainer's explicit go-ahead, push `develop` to `origin` and run the workflow; verify `scan` succeeds, SARIF appears in code scanning, and a dispatched `fix` targets `develop` (or reports nothing to do)
 - [x] 2.4 Document the self-check in the README Development section (what it scans, where requests go) and verify the description matches `deepward.yaml` and the workflow
 
 ## 3. Visual assets
