@@ -160,7 +160,10 @@ project, while the demo repository carries the showy findings.
   `scan` on push to `main` and `develop` and on pull requests, with
   `--fail-on high`, the HTML report as an artifact and SARIF uploaded to
   code scanning; `fix --publish --target-branch develop` on a weekly
-  schedule and on `workflow_dispatch`, with `secrets.GITHUB_TOKEN`.
+  schedule and on `workflow_dispatch`, with `secrets.GITHUB_TOKEN`. The
+  `fix` job checks out `develop`, so it verifies against the code and the
+  `deepward.yaml` of the branch its requests target (scheduled and manual
+  runs start from `main`).
 - Deepward is installed in the workflow from the latest published release
   archive (pinned version, checksum verified), not built from the checked-out
   source: the badge then means "the released tool checks this repository".
