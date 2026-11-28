@@ -38,7 +38,7 @@
 ## 6. Integration check
 
 - [ ] 6.1 Preview the README on GitHub (a pushed branch or the rendered preview) in light and dark themes and on a narrow window; verify images, badges, table and links all load and the layout reads in order hero, GIF, quickstart, why, comparison, works with, what you get, install
-- [ ] 6.2 Run `make test` and `make lint` and verify both pass, confirming the Makefile change and `deepward.yaml` did not break the build or the tests
+- [x] 6.2 Run `make test` and `make lint` and verify both pass, confirming the Makefile change and `deepward.yaml` did not break the build or the tests
 
 ## Workflow follow-up
 
