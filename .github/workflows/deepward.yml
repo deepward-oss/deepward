@@ -57,7 +57,10 @@ jobs:
       pull-requests: write
       issues: write
     steps:
+      # Requests target develop, so verify against develop's code and config.
       - uses: actions/checkout@v4
+        with:
+          ref: develop
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
